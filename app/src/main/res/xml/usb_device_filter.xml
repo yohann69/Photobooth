@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Vendor/product IDs are decimal: 0x04A9=1193 (Canon), 0x1343=4931 (DNP), 0x1D90=7568 (Citizen Systems). -->
+    <usb>
+        <!-- Canon (PTP cameras) -->
+        <usb-device vendor-id="1193" />
+        <!-- DNP -->
+        <usb-device vendor-id="4931" />
+        <!-- Citizen Systems -->
+        <usb-device vendor-id="7568" />
+        <!-- Generic USB printer class (covers other dye-sub printers) -->
+        <usb-device class="7" />
+        <!-- Generic still-image/PTP class (covers non-Canon cameras) -->
+        <usb-device class="6" subclass="1" protocol="1" />
+    </usb>
+</resources>
