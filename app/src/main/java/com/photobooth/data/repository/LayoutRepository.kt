@@ -30,13 +30,15 @@ class LayoutRepository @Inject constructor(
     /** Inserts default presets for any [LayoutType] the event does not have yet. Returns how many were added. */
     suspend fun ensureDefaults(eventId: String, aspect: PhotoAspect = PhotoAspect.RATIO_4_3): Int {
         val existing = dao.getTypes(eventId).toSet()
+        // A new event starts with the recommended set; layouts added by an update start off in existing events.
+        val fresh = existing.isEmpty()
         val missing = DefaultLayoutPresets.all(aspect)
             .filter { it.type !in existing }
             .map {
                 EventLayoutConfigEntity(
                     eventId = eventId,
                     layoutType = it.type,
-                    isEnabled = true,
+                    isEnabled = fresh && it.type.enabledByDefault,
                     orientation = it.orientation,
                     canvasWidthPx = it.canvasWidthPx,
                     canvasHeightPx = it.canvasHeightPx,

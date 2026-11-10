@@ -52,6 +52,17 @@ class FrameStorage @Inject constructor(
         }
     }
 
+    /** Stores a frame received from the organisers' upload page, after checking that it really is a PNG. */
+    suspend fun importBytes(framesDir: File, config: EventLayoutConfigEntity, png: ByteArray): Result<File> = withContext(io) {
+        runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(png, 0, png.size, bounds)
+            if (bounds.outMimeType != "image/png" || bounds.outWidth <= 0) throw IOException("Received file is not a PNG image")
+            framesDir.mkdirs()
+            File(framesDir, "${config.layoutType.name}_${System.currentTimeMillis()}.png").also { it.writeBytes(png) }
+        }
+    }
+
     /**
      * Writes a semi-opaque frame whose transparent holes sit exactly on the layout's uncalibrated slots,
      * with the logo safe zone marked so artwork can be positioned against it.

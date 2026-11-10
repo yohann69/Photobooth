@@ -1,6 +1,7 @@
 package com.photobooth.share
 
 import com.photobooth.BuildConfig
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -9,6 +10,7 @@ import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.time.OffsetDateTime
 import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -49,6 +51,13 @@ class UploadRequest(
     val eventDate: String,
     val layoutType: String,
 )
+
+/** A temporary link where the organisers send the event's frames. */
+class FrameLink(val id: Long, val url: String, val expiresAtMillis: Long)
+
+class RemoteFrame(val layoutType: String, val sha256: String, val width: Int, val height: Int)
+
+class FrameLinkStatus(val expired: Boolean, val uploads: List<RemoteFrame>)
 
 class StartedUpload(val fileId: Long, val uploadUrl: String, val fileName: String)
 
@@ -125,12 +134,51 @@ class TransatShareApi @Inject constructor() {
         json.getString("url").also { require(it.startsWith("https://")) { "unexpected share link" } }
     }
 
+    /**
+     * Opens a temporary link where the organisers send the frame of each layout ([layouts]: the geometry the page
+     * draws the templates from). The link is shown as a QR code; the booth then polls [frameUploads].
+     */
+    fun openFrameLink(server: TransatServer, eventName: String, layouts: JSONArray): Result<FrameLink> = runCatching {
+        val json = JSONObject(call(server, "POST", "/photobooth/booth/frame-sessions", JSONObject().put("event_name", eventName).put("layouts", layouts).toString()))
+        val url = json.getString("url")
+        require(url.startsWith("https://") || (BuildConfig.DEBUG && URL(url).host in LOCAL_HOSTS)) { "unexpected frame link" }
+        FrameLink(json.getLong("id"), url, OffsetDateTime.parse(json.getString("expires_at")).toInstant().toEpochMilli())
+    }
+
+    /** What was sent to the link so far, and whether it still accepts uploads. */
+    fun frameUploads(server: TransatServer, linkId: Long): Result<FrameLinkStatus> = runCatching {
+        val json = JSONObject(call(server, "GET", "/photobooth/booth/frame-sessions/$linkId", null))
+        val list = json.getJSONArray("uploads")
+        FrameLinkStatus(
+            expired = json.optBoolean("expired"),
+            uploads = (0 until list.length()).map { i ->
+                list.getJSONObject(i).let { RemoteFrame(it.getString("layout_type"), it.getString("sha256"), it.getInt("width"), it.getInt("height")) }
+            },
+        )
+    }
+
+    /** The PNG sent for one layout; checked against the hash the server announced. */
+    fun downloadFrame(server: TransatServer, linkId: Long, frame: RemoteFrame): Result<ByteArray> = runCatching {
+        require(LAYOUT_TYPE.matches(frame.layoutType)) { "invalid layout type" }
+        val bytes = request(server, "GET", "/photobooth/booth/frame-sessions/$linkId/frames/${frame.layoutType}", null)
+        val sum = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
+        if (!sum.equals(frame.sha256, ignoreCase = true)) throw IOException("frame changed while downloading")
+        bytes
+    }
+
+    fun closeFrameLink(server: TransatServer, linkId: Long): Result<Unit> = runCatching {
+        call(server, "DELETE", "/photobooth/booth/frame-sessions/$linkId", null)
+    }
+
     private fun session(id: String): String {
         require(SESSION_ID.matches(id)) { "invalid session id" }
         return "/photobooth/booth/sessions/$id"
     }
 
-    private fun call(server: TransatServer, method: String, path: String, body: String?, retriedClock: Boolean = false): String {
+    private fun call(server: TransatServer, method: String, path: String, body: String?): String =
+        String(request(server, method, path, body), Charsets.UTF_8)
+
+    private fun request(server: TransatServer, method: String, path: String, body: String?, retriedClock: Boolean = false): ByteArray {
         val url = URL(server.baseUrl + path)
         require(url.protocol == "https" || (BuildConfig.DEBUG && url.host in LOCAL_HOSTS)) { "the server must use https" }
         val bytes = body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
@@ -148,12 +196,12 @@ class TransatShareApi @Inject constructor() {
         }
         try {
             if (body != null) conn.outputStream.use { it.write(bytes) }
-            return readBody(conn)
+            return readBytes(conn)
         } catch (e: ApiException) {
             val serverTime = conn.getHeaderField("X-Photobooth-Server-Time")?.toLongOrNull()
             if (e.code == 401 && serverTime != null && !retriedClock && e.message.orEmpty().contains("clock_skew")) {
                 clockOffsetSec = serverTime - System.currentTimeMillis() / 1000
-                return call(server, method, path, body, retriedClock = true)
+                return request(server, method, path, body, retriedClock = true)
             }
             throw e
         } finally {
@@ -170,17 +218,20 @@ class TransatShareApi @Inject constructor() {
         conn.setRequestProperty("X-Photobooth-Signature", signature(credential.secret, canonical(method, rawPath, timestamp, nonce, body)))
     }
 
-    private fun readBody(conn: HttpURLConnection): String {
+    private fun readBody(conn: HttpURLConnection): String = String(readBytes(conn))
+
+    private fun readBytes(conn: HttpURLConnection): ByteArray {
         val code = conn.responseCode
         if (code !in 200..299) {
             val detail = conn.errorStream?.use { String(it.readBytes()).take(300) }.orEmpty()
             throw ApiException(code, "HTTP $code $detail".trim())
         }
-        return conn.inputStream.use { String(it.readBytes()) }
+        return conn.inputStream.use { it.readBytes() }
     }
 
     companion object {
         private val SESSION_ID = Regex("^[A-Za-z0-9_-]{8,64}$")
+        private val LAYOUT_TYPE = Regex("^[A-Z0-9_]{1,40}$")
         private val LOCAL_HOSTS = setOf("localhost", "127.0.0.1", "10.0.2.2")
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val API_READ_TIMEOUT_MS = 45_000

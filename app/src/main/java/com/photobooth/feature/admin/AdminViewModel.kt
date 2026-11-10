@@ -23,10 +23,14 @@ import com.photobooth.render.DummyPhotos
 import com.photobooth.render.PhotoCompositorEngine
 import com.photobooth.render.PhotoDecoder
 import com.photobooth.render.PhotoSupplier
+import com.photobooth.feature.booth.frenchTitle
+import com.photobooth.share.FrameLinkState
+import com.photobooth.share.FrameReceiver
 import com.photobooth.share.UploadManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -62,6 +66,7 @@ class AdminViewModel @Inject constructor(
     private val printController: PrintController,
     private val dnp: DnpPrinterLink,
     private val uploads: UploadManager,
+    private val frameReceiver: FrameReceiver,
 ) : ViewModel() {
 
     private data class Local(val tab: AdminTab = AdminTab.DASHBOARD, val message: String? = null, val selfTest: SelfTestState = SelfTestState.Idle)
@@ -114,6 +119,10 @@ class AdminViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AdminUiState())
 
+    /** The QR code link where organisers send this event's frames, while it is shown. */
+    val frameLink: StateFlow<FrameLinkState> = frameReceiver.state
+    private var frameLinkJob: Job? = null
+
     fun onIntent(intent: AdminIntent) {
         when (intent) {
             is AdminIntent.SelectTab -> {
@@ -137,6 +146,16 @@ class AdminViewModel @Inject constructor(
 
             is AdminIntent.ToggleLayout -> withActiveEvent { layouts.setEnabled(it.id, intent.type, intent.enabled) }
             is AdminIntent.ImportFrame -> importFrame(intent)
+            AdminIntent.OpenFrameLink -> if (frameLinkJob?.isActive != true) {
+                frameLinkJob = viewModelScope.launch {
+                    val event = events.getActive() ?: return@launch post("Create or select an event first")
+                    frameReceiver.run(event) { type -> post("Frame received and applied to ${type.frenchTitle()}") }
+                }
+            }
+            AdminIntent.CloseFrameLink -> {
+                frameLinkJob?.cancel()
+                frameReceiver.dismissFailure()
+            }
             is AdminIntent.GenerateTestFrame -> generateTestFrame(intent.type)
             is AdminIntent.RemoveFrame -> withActiveEvent { e ->
                 layouts.get(e.id, intent.type)?.let { frames.delete(it.customFramePngPath) }

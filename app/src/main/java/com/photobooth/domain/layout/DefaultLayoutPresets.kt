@@ -34,24 +34,58 @@ object DefaultLayoutPresets {
     private sealed interface Plan {
         val side: Side
         val fraction: Float
+        /** White border around the photos; the first layouts keep 30 px so their existing frames still fit. */
+        val margin: Int get() = MARGIN
     }
+
+    /** Border of the layouts added later: 4 mm, clear of the ~2 mm the printer may trim. */
+    private const val WIDE_MARGIN = 48
 
     /** [rows] x [cols] equal slots; with [repeatColumns] every column shows the same shots (row r = shot r). */
     private class Grid(
         override val side: Side, override val fraction: Float,
         val rows: Int, val cols: Int, val square: Boolean = false, val repeatColumns: Boolean = false,
+        override val margin: Int = MARGIN,
     ) : Plan
 
-    /** One big slot on top and two half-width slots below. */
-    private class HeroPlusTwo(override val side: Side, override val fraction: Float) : Plan
+    /** One big slot on top and a row of [count] equal slots below, together as wide as the big one. */
+    private class HeroRow(
+        override val side: Side, override val fraction: Float, val count: Int, override val margin: Int = MARGIN,
+    ) : Plan
+
+    /** One big slot on the left and two stacked slots on the right, as tall together as the big one. */
+    private class HeroSide(override val side: Side, override val fraction: Float) : Plan {
+        override val margin = WIDE_MARGIN
+    }
+
+    /**
+     * Two identical strips, each centred in its half of the sheet so a cut down the middle gives two 2x6 in strips;
+     * every strip has its own title area at the bottom (the safe zone spans both).
+     */
+    private class Strips(override val fraction: Float, val rows: Int) : Plan {
+        override val side = Side.FOOTER
+        override val margin = WIDE_MARGIN
+    }
 
     private fun plan(type: LayoutType): Plan = when (type) {
         LayoutType.LANDSCAPE_SINGLE -> Grid(Side.RIGHT, 0.25f, 1, 1)
         LayoutType.PORTRAIT_SINGLE -> Grid(Side.FOOTER, 0.45f, 1, 1)
         LayoutType.LANDSCAPE_DOUBLE -> Grid(Side.FOOTER, 0.25f, 1, 2)
-        LayoutType.PORTRAIT_TRIPLE -> HeroPlusTwo(Side.FOOTER, 0.22f)
+        LayoutType.PORTRAIT_TRIPLE -> HeroRow(Side.FOOTER, 0.22f, count = 2)
         LayoutType.GRID_2X2 -> Grid(Side.RIGHT, 0.25f, 2, 2)
         LayoutType.MOSAIC_6_SQUARE -> Grid(Side.FOOTER, 0.20f, 3, 2, square = true, repeatColumns = true)
+        LayoutType.LANDSCAPE_BANNER -> Grid(Side.FOOTER, 0.14f, 1, 1, margin = WIDE_MARGIN)
+        LayoutType.PORTRAIT_DUO -> Grid(Side.FOOTER, 0.20f, 2, 1, margin = WIDE_MARGIN)
+        LayoutType.LANDSCAPE_HERO_SIDE -> HeroSide(Side.FOOTER, 0.20f)
+        LayoutType.PORTRAIT_HERO_THREE -> HeroRow(Side.FOOTER, 0.25f, count = 3, margin = WIDE_MARGIN)
+        LayoutType.STRIP_DOUBLE_3 -> Strips(0.20f, rows = 3)
+        LayoutType.STRIP_DOUBLE_4 -> Strips(0.14f, rows = 4)
+    }
+
+    /** Smallest share of the sheet each layout leaves free for artwork; banners keep only a title band. */
+    fun minSafeZoneFraction(type: LayoutType): Float = when (type) {
+        LayoutType.LANDSCAPE_BANNER, LayoutType.STRIP_DOUBLE_4 -> 0.12f
+        else -> 0.2f
     }
 
     fun all(aspect: PhotoAspect = PhotoAspect.RATIO_4_3): List<LayoutPreset> = LayoutType.entries.map { forType(it, aspect) }
@@ -81,8 +115,8 @@ object DefaultLayoutPresets {
                 region = SafeZone(0, 0, canvasW - zoneW, canvasH)
             }
         }
-        val innerW = region.width - 2 * MARGIN
-        val innerH = region.height - 2 * MARGIN
+        val innerW = region.width - 2 * plan.margin
+        val innerH = region.height - 2 * plan.margin
 
         // Each rect is (x, y, w, h, shot) in canvas pixels, before centring inside the region.
         class Rect(val x: Int, val y: Int, val w: Int, val h: Int, val ratio: Float, val source: Int?)
@@ -102,21 +136,51 @@ object DefaultLayoutPresets {
                     Rect(col * (w + GAP), row * (h + GAP), w, h, ratio, if (plan.repeatColumns) row else null)
                 }
             }
-            is HeroPlusTwo -> {
+            is HeroSide -> {
                 val ratio = aspect.ratio
-                // Widest big slot whose height plus the half-width row below still fits the region.
-                val width = min(innerW.toFloat(), (innerH - GAP + GAP / (2f * ratio)) * ratio / 1.5f)
+                // bigH = 2 smallH + GAP and the row is bigW + GAP + smallW wide: the widest that fits the region.
+                fun widthFor(bigH: Float) = bigH * ratio + GAP + ((bigH - GAP) / 2f) * ratio
+                var bigH = innerH.toFloat()
+                if (widthFor(bigH) > innerW) bigH = (innerW - GAP + GAP * ratio / 2f) / (1.5f * ratio)
+                val bigHi = bigH.toInt()
+                val bigW = (bigHi * ratio).roundToInt()
+                val smallH = (bigHi - GAP) / 2
+                val smallW = (smallH * ratio).roundToInt()
+                blockW = bigW + GAP + smallW
+                blockH = bigHi
+                rects = listOf(
+                    Rect(0, 0, bigW, bigHi, ratio, null),
+                    Rect(bigW + GAP, 0, smallW, smallH, ratio, null),
+                    Rect(bigW + GAP, smallH + GAP, smallW, smallH, ratio, null),
+                )
+            }
+            is Strips -> {
+                val ratio = aspect.ratio
+                val half = region.width / 2
+                val w = min(half - 2 * plan.margin, (((innerH - (plan.rows - 1) * GAP) / plan.rows) * ratio).toInt())
+                val h = (w / ratio).roundToInt()
+                blockW = region.width
+                blockH = plan.rows * h + (plan.rows - 1) * GAP
+                rects = List(plan.rows * 2) { i ->
+                    val row = i / 2
+                    val col = i % 2
+                    // Each column centred in its own half of the sheet, whatever the gap between the strips.
+                    Rect(col * half + (half - w) / 2, row * (h + GAP), w, h, ratio, row)
+                }
+            }
+            is HeroRow -> {
+                val ratio = aspect.ratio
+                val n = plan.count
+                // Widest big slot whose height plus the row below still fits the region.
+                val width = min(innerW.toFloat(), (innerH - GAP + (n - 1) * GAP / (n * ratio)) * ratio * n / (n + 1f))
                 val bigW = width.toInt()
                 val bigH = (bigW / ratio).roundToInt()
-                val smallW = (bigW - GAP) / 2
+                val smallW = (bigW - (n - 1) * GAP) / n
                 val smallH = (smallW / ratio).roundToInt()
                 blockW = bigW
                 blockH = bigH + GAP + smallH
-                rects = listOf(
-                    Rect(0, 0, bigW, bigH, ratio, null),
-                    Rect(0, bigH + GAP, smallW, smallH, ratio, null),
-                    Rect(smallW + GAP, bigH + GAP, smallW, smallH, ratio, null),
-                )
+                rects = listOf(Rect(0, 0, bigW, bigH, ratio, null)) +
+                    List(n) { i -> Rect(i * (smallW + GAP), bigH + GAP, smallW, smallH, ratio, null) }
             }
         }
         val originX = region.x + (region.width - blockW) / 2

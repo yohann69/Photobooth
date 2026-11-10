@@ -58,6 +58,9 @@ import com.photobooth.domain.model.LayoutType
 import com.photobooth.domain.layout.DefaultLayoutPresets
 import com.photobooth.domain.model.Orientation
 import com.photobooth.domain.model.PhotoAspect
+import com.photobooth.feature.booth.frenchTitle
+import com.photobooth.share.FrameLinkState
+import com.photobooth.share.QrCodes
 import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.math.roundToInt
@@ -68,6 +71,7 @@ typealias FrameSizeReader = suspend (String) -> Pair<Int, Int>?
 @Composable
 fun LayoutsTab(
     state: AdminUiState,
+    frameLink: FrameLinkState,
     onIntent: (AdminIntent) -> Unit,
     render: PreviewRenderer,
     frameSize: FrameSizeReader,
@@ -92,11 +96,16 @@ fun LayoutsTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                PrimaryAction("Receive frames by QR code") { onIntent(AdminIntent.OpenFrameLink) }
             }
         }
         items(state.layouts, key = { it.layoutType.name }) { cfg ->
             LayoutCard(cfg, onIntent, render, onConfigure = { selected = cfg.layoutType })
         }
+    }
+
+    if (frameLink != FrameLinkState.Closed) {
+        FrameLinkDialog(frameLink, state.activeEvent?.name.orEmpty(), onClose = { onIntent(AdminIntent.CloseFrameLink) })
     }
 
     val current = state.layouts.firstOrNull { it.layoutType == selected }
@@ -303,3 +312,67 @@ private fun CalibrationRow(label: String, value: Int, range: IntRange, onChange:
         )
     }
 }
+
+/**
+ * The QR code organisers scan to send the event's frames from their phones. Every frame sent is downloaded and
+ * applied to its layout within seconds; closing the dialog closes the link.
+ */
+@Composable
+private fun FrameLinkDialog(link: FrameLinkState, eventName: String, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth(0.8f), shape = RoundedCornerShape(24.dp), tonalElevation = 6.dp) {
+            Row(Modifier.padding(32.dp), horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(360.dp).clip(RoundedCornerShape(16.dp)).background(Color.White), contentAlignment = Alignment.Center) {
+                    when (link) {
+                        is FrameLinkState.Open -> {
+                            val qr = remember(link.url) { QrCodes.bitmap(link.url, 720).asImageBitmap() }
+                            Image(qr, contentDescription = "QR code of the frame upload page", modifier = Modifier.fillMaxSize().padding(12.dp))
+                        }
+                        is FrameLinkState.Failed -> Text("!", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.error)
+                        else -> CircularProgressIndicator()
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Frames for $eventName", style = MaterialTheme.typography.headlineSmall)
+                    when (link) {
+                        is FrameLinkState.Open -> {
+                            Text(
+                                "Scan with a phone to download each collage's template and send its PNG frame. " +
+                                    "Each frame is applied here automatically as soon as it is sent.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(link.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val minutesLeft by produceState(minutesUntil(link.expiresAtMillis), link.expiresAtMillis) {
+                                while (true) {
+                                    delay(30_000)
+                                    value = minutesUntil(link.expiresAtMillis)
+                                }
+                            }
+                            Text("Link valid for $minutesLeft more minutes", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "Received: ${link.received.size} / ${link.layouts.size}",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            link.layouts.forEach { type ->
+                                val done = type in link.received
+                                Text(
+                                    (if (done) "✓  " else "•  ") + type.frenchTitle(),
+                                    color = if (done) Color(0xFF4ADE80) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            link.warning?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        is FrameLinkState.Failed -> Text(link.message, color = MaterialTheme.colorScheme.error)
+                        else -> Text("Opening a link on the Transat server…")
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onClose) { Text(if (link is FrameLinkState.Open) "Done" else "Close") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun minutesUntil(millis: Long) = ((millis - System.currentTimeMillis()) / 60_000).coerceAtLeast(0)

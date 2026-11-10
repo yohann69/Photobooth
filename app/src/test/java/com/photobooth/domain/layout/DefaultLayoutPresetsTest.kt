@@ -15,7 +15,11 @@ class DefaultLayoutPresetsTest {
     @Test
     fun onlyFullSheetLayoutsExist() {
         assertEquals(
-            listOf("LANDSCAPE_SINGLE", "PORTRAIT_SINGLE", "LANDSCAPE_DOUBLE", "PORTRAIT_TRIPLE", "GRID_2X2", "MOSAIC_6_SQUARE"),
+            // Stored by name in the database: existing names must never change, new ones are appended.
+            listOf(
+                "LANDSCAPE_SINGLE", "PORTRAIT_SINGLE", "LANDSCAPE_DOUBLE", "PORTRAIT_TRIPLE", "GRID_2X2", "MOSAIC_6_SQUARE",
+                "LANDSCAPE_BANNER", "PORTRAIT_DUO", "LANDSCAPE_HERO_SIDE", "PORTRAIT_HERO_THREE", "STRIP_DOUBLE_3", "STRIP_DOUBLE_4",
+            ),
             LayoutType.entries.map { it.name },
         )
         PhotoAspect.entries.forEach { aspect ->
@@ -85,11 +89,50 @@ class DefaultLayoutPresetsTest {
     }
 
     @Test
-    fun logoZoneTakesAtLeastTwentyPercentOfTheSheet() {
+    fun logoZoneLeavesRoomForArtwork() {
         LayoutType.entries.forEach { type ->
             val f = DefaultLayoutPresets.forType(type).safeZoneFraction
-            assertTrue("$type zone $f", f in 0.199f..0.5f)
+            val min = DefaultLayoutPresets.minSafeZoneFraction(type)
+            assertTrue("$type zone $f", f in (min - 0.001f)..0.5f)
         }
+    }
+
+    @Test
+    fun doubleStripsCutDownTheMiddleIntoTwoIdenticalStrips() {
+        for (type in listOf(LayoutType.STRIP_DOUBLE_3, LayoutType.STRIP_DOUBLE_4)) {
+            PhotoAspect.entries.forEach { aspect ->
+                val p = DefaultLayoutPresets.forType(type, aspect)
+                val w = p.canvasWidthPx
+                p.slots.chunked(2).forEachIndexed { row, (left, right) ->
+                    assertEquals(row, left.sourceIndex)
+                    assertEquals(row, right.sourceIndex)
+                    // Each column is centred in its half, so both strips are the same once cut.
+                    assertEquals(0.25f, left.x + left.width / 2f, 1f / w)
+                    assertEquals(0.75f, right.x + right.width / 2f, 1f / w)
+                    assertTrue("$type photo crosses the cut", (left.x + left.width) * w <= w / 2f)
+                }
+                assertEquals(type.photoCount, DefaultLayoutPresets.forType(type, aspect).slots.map { it.sourceIndex }.distinct().size)
+            }
+        }
+    }
+
+    @Test
+    fun heroSideIsOneBigPhotoBesideTwoStackedOnes() {
+        PhotoAspect.entries.forEach { aspect ->
+            val p = DefaultLayoutPresets.forType(LayoutType.LANDSCAPE_HERO_SIDE, aspect)
+            val (big, top, bottom) = p.slots
+            assertTrue(top.x > big.x + big.width)
+            assertEquals(top.x, bottom.x, 0.0001f)
+            assertEquals(big.y, top.y, 0.0001f)
+            // The two small ones end where the big one ends.
+            assertEquals((big.y + big.height) * p.canvasHeightPx, (bottom.y + bottom.height) * p.canvasHeightPx, 2f)
+        }
+    }
+
+    @Test
+    fun aNewEventStartsWithAShortListOfLayouts() {
+        val defaults = LayoutType.entries.filter { it.enabledByDefault }
+        assertTrue(defaults.size in 4..8)
     }
 
     @Test

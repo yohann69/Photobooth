@@ -63,6 +63,9 @@ sealed interface AdminIntent {
 
     data class ToggleLayout(val type: LayoutType, val enabled: Boolean) : AdminIntent
     data class ImportFrame(val type: LayoutType, val uri: Uri) : AdminIntent
+    /** Shows a QR code where the organisers send the event's frames from their phones. */
+    data object OpenFrameLink : AdminIntent
+    data object CloseFrameLink : AdminIntent
     data class GenerateTestFrame(val type: LayoutType) : AdminIntent
     data class RemoveFrame(val type: LayoutType) : AdminIntent
     data class SetCalibration(val type: LayoutType, val paddingPx: Int, val offsetXPx: Int, val offsetYPx: Int) : AdminIntent

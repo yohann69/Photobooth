@@ -64,4 +64,10 @@ fun LayoutType.frenchTitle(): String = when (this) {
     LayoutType.PORTRAIT_TRIPLE -> "Portrait Trio"
     LayoutType.GRID_2X2 -> "Grille 4 Photos"
     LayoutType.MOSAIC_6_SQUARE -> "Mosaïque 6 Carrés"
+    LayoutType.LANDSCAPE_BANNER -> "Bannière"
+    LayoutType.PORTRAIT_DUO -> "Portrait Duo"
+    LayoutType.LANDSCAPE_HERO_SIDE -> "Paysage Trio"
+    LayoutType.PORTRAIT_HERO_THREE -> "Portrait 1+3"
+    LayoutType.STRIP_DOUBLE_3 -> "Bandes 3 Photos"
+    LayoutType.STRIP_DOUBLE_4 -> "Bandes 4 Photos"
 }

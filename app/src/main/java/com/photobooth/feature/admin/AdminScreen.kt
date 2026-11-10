@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit, onOpenSettings: () -> Unit) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    val frameLink = viewModel.frameLink.collectAsStateWithLifecycle().value
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -95,7 +96,7 @@ fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit, onOpenSettings: (
                         AdminTab.DASHBOARD -> DashboardTab(state, viewModel::onIntent)
                         AdminTab.EVENTS -> EventsTab(state, viewModel::onIntent)
                         AdminTab.EVENT_SETTINGS -> EventSettingsTab(state, viewModel::onIntent)
-                        AdminTab.LAYOUTS -> LayoutsTab(state, viewModel::onIntent, viewModel::renderPreview, viewModel::frameSize)
+                        AdminTab.LAYOUTS -> LayoutsTab(state, frameLink, viewModel::onIntent, viewModel::renderPreview, viewModel::frameSize)
                     }
                 }
             }
