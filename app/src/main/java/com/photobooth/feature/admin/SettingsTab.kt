@@ -1,5 +1,11 @@
 package com.photobooth.feature.admin
 
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -109,18 +115,61 @@ private fun PrinterCard(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
 @Composable
 private fun KioskCard(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
     SectionCard("Kiosk & display") {
+        HomeAppRow(state.settings.kioskModeEnabled)
         SwitchRow(
-            "Kiosk mode (lock task)",
-            "Pins the app with startLockTask(); guests cannot leave it. Android may ask to confirm screen pinning.",
+            "Kiosk mode",
+            "Pins the app so guests cannot leave it (Android may ask once to confirm the pinning), shows it over the lock " +
+                "screen, and opens straight on the guest screen of the running event.",
             state.settings.kioskModeEnabled,
         ) { onIntent(AdminIntent.SetKioskMode(it)) }
-        SwitchRow("Keep screen awake", "Prevents the display from sleeping while the app is open.", state.settings.keepScreenOn) {
+        SwitchRow("Keep screen on while charging", "On the charger the display never sleeps; on battery it sleeps as usual.", state.settings.keepScreenOn) {
             onIntent(AdminIntent.SetKeepScreenOn(it))
         }
         SwitchRow("Hide system bars", "Immersive mode; swipe from an edge to reveal them briefly.", state.settings.hideSystemBars) {
             onIntent(AdminIntent.SetHideSystemBars(it))
         }
     }
+}
+
+/**
+ * Whether the booth is the tablet's home app. As home app, Android opens it by itself after every boot (once the
+ * tablet is unlocked) and whenever Home is pressed.
+ */
+@Composable
+private fun HomeAppRow(kiosk: Boolean) {
+    val context = LocalContext.current
+    var isHome by remember { mutableStateOf(isDefaultHome(context)) }
+    LifecycleResumeEffect(Unit) {
+        isHome = isDefaultHome(context)
+        onPauseOrDispose { }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Open at startup", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            if (isHome) "The booth is the tablet's home app: it opens by itself after a restart and when Home is pressed."
+            else "Make the booth the tablet's home app so it opens by itself after a restart. In the list, pick Photobooth.",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isHome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (kiosk) {
+            Text(
+                "Android settings cannot open while kiosk mode is on: turn kiosk mode off first to change the home app.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(
+            enabled = !kiosk,
+            onClick = {
+                val home = Intent(Settings.ACTION_HOME_SETTINGS)
+                runCatching { context.startActivity(home) }.onFailure { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            },
+        ) { Text(if (isHome) "Change home app" else "Choose home app") }
+    }
+}
+
+private fun isDefaultHome(context: Context): Boolean {
+    val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+    return context.packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName == context.packageName
 }
 
 /** Live readout of the DNP DS-RX1HS plus the raster orientation controls and test sheets. */

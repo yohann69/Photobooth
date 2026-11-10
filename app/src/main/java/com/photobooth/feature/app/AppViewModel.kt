@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -82,6 +83,16 @@ class AppViewModel @Inject constructor(
             else layouts.observeEnabledForEvent(event.id).map { list -> GuestInfo(event.name, list.map { it.layoutType }) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuestInfo())
+
+    init {
+        // A kiosk that starts on its own (after a reboot, on Home) opens straight on the guest screen of the running
+        // event; the operator changes event from the admin panel.
+        viewModelScope.launch {
+            if (settingsRepository.settings.first().kioskModeEnabled && events.getActive() != null) {
+                _state.update { if (it.route == AppRoute.EVENT_PICKER) it.copy(route = AppRoute.GUEST) else it }
+            }
+        }
+    }
 
     private var pending: PendingAction = PendingAction.OpenAdmin
     private var settingsReturnTo = AppRoute.EVENT_PICKER

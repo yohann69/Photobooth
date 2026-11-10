@@ -22,9 +22,10 @@ val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class AppSettings(
     val isPinConfigured: Boolean = false,
-    val kioskModeEnabled: Boolean = false,
+    val kioskModeEnabled: Boolean = true,
+    /** Keeps the display on while the tablet is charging; on battery it sleeps as usual. */
     val keepScreenOn: Boolean = true,
-    val hideSystemBars: Boolean = false,
+    val hideSystemBars: Boolean = true,
     /** Lifetime printed copies at the moment the current roll was installed. */
     val rollBaselinePrints: Int = 0,
     /** Simulate printing: jobs complete as SIMULATED without touching any printer. */
@@ -49,9 +50,9 @@ class SettingsRepository @Inject constructor(
     val settings: Flow<AppSettings> = store.data.map { p ->
         AppSettings(
             isPinConfigured = p[PIN_HASH] != null,
-            kioskModeEnabled = p[KIOSK_MODE] ?: false,
+            kioskModeEnabled = p[KIOSK_MODE] ?: true,
             keepScreenOn = p[KEEP_SCREEN_ON] ?: true,
-            hideSystemBars = p[HIDE_SYSTEM_BARS] ?: false,
+            hideSystemBars = p[HIDE_SYSTEM_BARS] ?: true,
             rollBaselinePrints = p[ROLL_BASELINE] ?: 0,
             printDryRun = p[PRINT_DRY_RUN] ?: false,
             dnpFlipVertical = p[DNP_FLIP_VERTICAL] ?: true,

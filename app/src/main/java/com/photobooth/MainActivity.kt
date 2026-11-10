@@ -2,7 +2,12 @@ package com.photobooth
 
 import android.Manifest
 import android.app.ActivityManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
@@ -117,8 +122,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Follows the charger: the screen is kept on only while the tablet is plugged in. */
+    private val powerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            if (plugged != charging) {
+                charging = plugged
+                applyDisplaySettings(appliedSettings)
+            }
+        }
+    }
+    private var charging = false
+
     override fun onStart() {
         super.onStart()
+        // ACTION_BATTERY_CHANGED is sticky: registering delivers the current state at once.
+        ContextCompat.registerReceiver(this, powerReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         printController.start()
         printController.kick()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -129,6 +148,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        unregisterReceiver(powerReceiver)
         cameraViewModel.onIntent(CameraIntent.Pause)
         super.onStop()
     }
@@ -142,8 +162,11 @@ class MainActivity : ComponentActivity() {
     private fun applyDisplaySettings(settings: AppSettings) {
         appliedSettings = settings
 
-        if (settings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val keepAwake = settings.keepScreenOn && charging
+        if (keepAwake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // In kiosk mode the booth shows over the lock screen when the display wakes; Android itself stays locked.
+        setShowWhenLocked(settings.kioskModeEnabled)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
@@ -159,6 +182,6 @@ class MainActivity : ComponentActivity() {
             if (settings.kioskModeEnabled && !locked) startLockTask()
             else if (!settings.kioskModeEnabled && locked) stopLockTask()
         }.onFailure { Log.w(TAG, "MainActivity: lock task change failed: ${it.message}") }
-        Log.i(TAG, "MainActivity: display keepAwake=${settings.keepScreenOn} hideBars=${settings.hideSystemBars} kiosk=${settings.kioskModeEnabled}")
+        Log.i(TAG, "MainActivity: display keepAwake=$keepAwake (charging=$charging) hideBars=${settings.hideSystemBars} kiosk=${settings.kioskModeEnabled}")
     }
 }
