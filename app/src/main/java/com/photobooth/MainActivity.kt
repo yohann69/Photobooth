@@ -27,11 +27,15 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.photobooth.core.PhotoboothLog.TAG
 import com.photobooth.data.settings.AppSettings
+import com.photobooth.feature.admin.AdminIntent
 import com.photobooth.feature.admin.AdminScreen
+import com.photobooth.feature.admin.AdminTab
+import com.photobooth.feature.admin.AppSettingsScreen
 import com.photobooth.feature.admin.AdminViewModel
 import com.photobooth.feature.app.AppIntent
 import com.photobooth.feature.app.AppRoute
 import com.photobooth.feature.app.AppViewModel
+import com.photobooth.feature.app.EventPickerScreen
 import com.photobooth.feature.app.PinPadDialog
 import com.photobooth.feature.booth.BoothIntent
 import com.photobooth.feature.booth.BoothRoot
@@ -39,9 +43,7 @@ import com.photobooth.feature.booth.BoothSessionViewModel
 import com.photobooth.feature.camera.CameraIntent
 import com.photobooth.feature.camera.CameraViewModel
 import com.photobooth.print.PrintController
-import com.photobooth.share.LocalGalleryHttpServer
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -52,7 +54,6 @@ class MainActivity : ComponentActivity() {
     private val cameraViewModel: CameraViewModel by viewModels()
     private val boothViewModel: BoothSessionViewModel by viewModels()
 
-    @Inject lateinit var gallery: LocalGalleryHttpServer
     @Inject lateinit var printController: PrintController
 
     private var appliedSettings = AppSettings()
@@ -68,12 +69,34 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface {
                     val app by appViewModel.state.collectAsStateWithLifecycle()
+                    val events by appViewModel.eventList.collectAsStateWithLifecycle()
                     when (app.route) {
+                        AppRoute.EVENT_PICKER -> EventPickerScreen(
+                            events,
+                            onPick = { appViewModel.onIntent(AppIntent.PickEvent(it)) },
+                            onCreate = { name, date -> appViewModel.onIntent(AppIntent.CreateEvent(name, date)) },
+                            onSettings = { appViewModel.onIntent(AppIntent.RequestSettings) },
+                        )
                         AppRoute.GUEST -> BoothRoot(boothViewModel, onAdminRequested = { appViewModel.onIntent(AppIntent.RequestAdmin) })
                         AppRoute.ADMIN -> {
                             LaunchedEffect(Unit) { boothViewModel.onIntent(BoothIntent.Abort) }
+                            LaunchedEffect(app.openEventSettings) {
+                                if (app.openEventSettings) {
+                                    adminViewModel.onIntent(AdminIntent.SelectTab(AdminTab.EVENT_SETTINGS))
+                                    appViewModel.onIntent(AppIntent.EventSettingsOpened)
+                                }
+                            }
                             BackHandler { appViewModel.onIntent(AppIntent.ExitAdmin) }
-                            AdminScreen(adminViewModel, onExit = { appViewModel.onIntent(AppIntent.ExitAdmin) })
+                            AdminScreen(
+                                adminViewModel,
+                                onExit = { appViewModel.onIntent(AppIntent.ExitAdmin) },
+                                onOpenSettings = { appViewModel.onIntent(AppIntent.OpenSettings) },
+                            )
+                        }
+                        AppRoute.SETTINGS -> {
+                            BackHandler { appViewModel.onIntent(AppIntent.CloseSettings) }
+                            val admin by adminViewModel.state.collectAsStateWithLifecycle()
+                            AppSettingsScreen(admin, adminViewModel::onIntent, onBack = { appViewModel.onIntent(AppIntent.CloseSettings) })
                         }
                     }
                     if (app.pinDialogVisible) {
@@ -97,7 +120,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        lifecycleScope.launch(Dispatchers.IO) { gallery.start() }
         printController.start()
         printController.kick()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {

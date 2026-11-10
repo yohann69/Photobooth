@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.photobooth.data.db.entity.EventEntity
-import com.photobooth.domain.model.PhotoFilterType
 import com.photobooth.feature.booth.BoothColors
 import com.photobooth.feature.booth.EventBackdrop
 import com.photobooth.feature.booth.EventTheme
@@ -149,7 +148,6 @@ private fun GuestPreview(event: EventEntity) {
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("BIENVENUE", color = BoothColors.AccentAlt, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text(event.name, color = BoothColors.OnDark, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -172,31 +170,5 @@ private fun GuestPreview(event: EventEntity) {
                 )
             }
         }
-    }
-}
-
-/** Per-event filter toggles; the guest filter bar is hidden when nothing but ORIGINAL (or nothing) is enabled. */
-@Composable
-fun FilterTogglesCard(event: EventEntity, onIntent: (AdminIntent) -> Unit) {
-    fun set(filters: List<PhotoFilterType>) = onIntent(AdminIntent.UpdateActiveEvent { it.copy(enabledFilters = filters) })
-    val enabled = event.enabledFilters
-    SectionCard("Photo filters for \"${event.name}\"") {
-        PhotoFilterType.entries.forEach { filter ->
-            SwitchRow(
-                label = filter.label,
-                description = if (filter == PhotoFilterType.ORIGINAL) "Unfiltered photo" else null,
-                checked = filter in enabled,
-            ) { on -> set(PhotoFilterType.entries.filter { (it in enabled && it != filter) || (it == filter && on) }) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { set(PhotoFilterType.ALL) }) { Text("Enable all") }
-            OutlinedButton(onClick = { set(emptyList()) }) { Text("Disable all filters") }
-        }
-        val hidden = enabled.none { it != PhotoFilterType.ORIGINAL }
-        Text(
-            if (hidden) "The filter bar is hidden on the guest final screen." else "Guests can choose between: ${enabled.joinToString { it.label }}.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

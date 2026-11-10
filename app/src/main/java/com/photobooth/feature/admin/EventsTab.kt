@@ -13,6 +13,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberDatePickerState
+import com.photobooth.core.EventDates
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -28,9 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.photobooth.domain.model.PhotoAspect
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun EventsTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
@@ -48,19 +50,14 @@ fun EventsTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
                 PrimaryAction("New event") { creating = true }
             }
         }
-        state.activeEvent?.let { active ->
-            item { ActiveEventSettings(active, onIntent) }
-            item { ThemeEditorCard(active, onIntent) }
-            item { FilterTogglesCard(active, onIntent) }
-        }
         items(state.events, key = { it.event.id }) { row -> EventCard(row, onSwitch = { onIntent(AdminIntent.SwitchEvent(row.event.id)) }) }
     }
 
     if (creating) {
         EventCreatorDialog(
-            onCreate = {
+            onCreate = { name, dateUtc ->
                 creating = false
-                onIntent(AdminIntent.CreateEvent(it))
+                onIntent(AdminIntent.CreateEvent(name, dateUtc))
             },
             onDismiss = { creating = false },
         )
@@ -68,12 +65,15 @@ fun EventsTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
 }
 
 @Composable
-private fun ActiveEventSettings(event: com.photobooth.data.db.entity.EventEntity, onIntent: (AdminIntent) -> Unit) {
-    SectionCard("Settings for \"${event.name}\"") {
+fun ActiveEventSettings(event: com.photobooth.data.db.entity.EventEntity, onIntent: (AdminIntent) -> Unit) {
+    SectionCard("General") {
         Stepper("Countdown", event.countdownSeconds, 1..15, unit = " s", onChange = { v -> onIntent(AdminIntent.UpdateActiveEvent { it.copy(countdownSeconds = v) }) })
         Stepper("Max prints per session", event.maxPrintsPerSession, 1..20, onChange = { v -> onIntent(AdminIntent.UpdateActiveEvent { it.copy(maxPrintsPerSession = v) }) })
         SwitchRow("Allow retakes", checked = event.allowRetakes) { v -> onIntent(AdminIntent.UpdateActiveEvent { it.copy(allowRetakes = v) }) }
-        SwitchRow("Digital QR share", "Offline sharing page reachable by QR code", event.enableDigitalQRShare) { v ->
+        SwitchRow("Welcome-screen slideshow", "Ken Burns slideshow of this event's recent photos behind the welcome screen.", event.attractSlideshow) { v ->
+            onIntent(AdminIntent.UpdateActiveEvent { it.copy(attractSlideshow = v) })
+        }
+        SwitchRow("Online gallery & QR code", "Uploads photos to the gallery server and shows a download QR code (server set in Hardware & app).", event.enableDigitalQRShare) { v ->
             onIntent(AdminIntent.UpdateActiveEvent { it.copy(enableDigitalQRShare = v) })
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -89,7 +89,6 @@ private fun ActiveEventSettings(event: com.photobooth.data.db.entity.EventEntity
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        SwitchRow("Mirror live preview", checked = event.mirrorLivePreview) { v -> onIntent(AdminIntent.UpdateActiveEvent { it.copy(mirrorLivePreview = v) }) }
     }
 }
 
@@ -109,7 +108,7 @@ private fun EventCard(row: EventRow, onSwitch: () -> Unit) {
                     if (active) AssistChip(onClick = {}, label = { Text("ACTIVE") })
                 }
                 Text(
-                    "Created ${SimpleDateFormat("d MMM yyyy HH:mm", Locale.getDefault()).format(Date(row.event.createdAt))}  |  " +
+                    "${EventDates.format(row.event.eventDate.takeIf { it > 0 } ?: row.event.createdAt)}  |  " +
                         "${row.photoCount} photos  |  ${row.printCount} prints",
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -120,29 +119,36 @@ private fun EventCard(row: EventRow, onSwitch: () -> Unit) {
     }
 }
 
+/** New event: just a name and the day it takes place. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EventCreatorDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit) {
+fun EventCreatorDialog(onCreate: (String, Long) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
-    val folder = name.trim().ifEmpty { "Event" }.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").replace(Regex("\\s+"), "_")
+    val dateState = rememberDatePickerState(initialSelectedDateMillis = EventDates.todayUtc())
+    var pickingDate by remember { mutableStateOf(false) }
+    val date = dateState.selectedDateMillis ?: EventDates.todayUtc()
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New event") },
+        title = { Text("Nouvel évènement") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Event name") },
-                    placeholder = { Text("Mariage Julie & Thomas") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    value = name, onValueChange = { name = it }, label = { Text("Nom de l'évènement") },
+                    placeholder = { Text("Mariage Julie & Thomas") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
-                Text("Folder: Pictures/Photobooth/<EventId>_$folder/", style = MaterialTheme.typography.bodyMedium)
-                Text("Subfolders: Originals/, Composited_Prints/, Frames/, Theme/, Sessions/", style = MaterialTheme.typography.bodySmall)
-                Text("A new event starts with clean default layouts: no frame or design from another event.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Date : ${EventDates.format(date, "EEEE d MMMM yyyy")}")
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text("Create & activate") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { onCreate(name.trim(), date) }, enabled = name.isNotBlank()) { Text("Créer") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
+    if (pickingDate) {
+        DatePickerDialog(
+            onDismissRequest = { pickingDate = false },
+            confirmButton = { TextButton(onClick = { pickingDate = false }) { Text("OK") } },
+        ) { DatePicker(dateState) }
+    }
 }

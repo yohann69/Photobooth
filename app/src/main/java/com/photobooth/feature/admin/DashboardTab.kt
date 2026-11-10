@@ -8,21 +8,30 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.photobooth.data.db.entity.PrintJobStatus
 import com.photobooth.diagnostics.HardwareBadge
+import com.photobooth.print.PrintStatus
 import java.io.File
 
 @Composable
@@ -48,21 +57,8 @@ fun DashboardTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
             }
         }
 
-        SectionCard("Kiosk & display") {
-            SwitchRow(
-                "Kiosk mode (lock task)",
-                "Pins the app with startLockTask(); guests cannot leave it. Android may ask to confirm screen pinning.",
-                state.settings.kioskModeEnabled,
-            ) { onIntent(AdminIntent.SetKioskMode(it)) }
-            SwitchRow("Keep screen awake", "Prevents the display from sleeping while the app is open.", state.settings.keepScreenOn) {
-                onIntent(AdminIntent.SetKeepScreenOn(it))
-            }
-            SwitchRow("Hide system bars", "Immersive mode; swipe from an edge to reveal them briefly.", state.settings.hideSystemBars) {
-                onIntent(AdminIntent.SetHideSystemBars(it))
-            }
-            SwitchRow("Attract slideshow", "Ken Burns slideshow of recent event photos on the welcome screen.", state.settings.attractSlideshow) {
-                onIntent(AdminIntent.SetAttractSlideshow(it))
-            }
+        SectionCard("Print queue") {
+            PrintQueue(state.printStatus, onIntent)
         }
 
         SectionCard("Test shot & test print") {
@@ -87,6 +83,49 @@ fun DashboardTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
                 is SelfTestState.Done -> SelfTestResultView(test.result)
             }
         }
+    }
+}
+
+@Composable
+private fun PrintQueue(status: PrintStatus, onIntent: (AdminIntent) -> Unit) {
+    var confirmAll by remember { mutableStateOf(false) }
+    if (status.jobs.isEmpty()) {
+        Text("No print waiting.", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    Text(
+        "${status.pendingJobs} job(s), ${status.pendingSheets} sheet(s) waiting" + (status.message?.let { " - $it" } ?: ""),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    status.jobs.forEach { job ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            AsyncImage(model = File(job.imagePath), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.height(96.dp).width(96.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    (if (job.status == PrintJobStatus.PRINTING) "Printing" else "Waiting") +
+                        ": ${job.copiesRemaining} of ${job.copies} sheet(s) left",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    job.lastError ?: File(job.imagePath).name,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(onClick = { onIntent(AdminIntent.CancelPrintJob(job.id)) }) { Text("Cancel") }
+        }
+    }
+    OutlinedButton(onClick = { confirmAll = true }) { Text("Cancel all") }
+    if (confirmAll) {
+        AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text("Cancel all waiting prints?") },
+            text = { Text("The printer is told to stop and none of these ${status.pendingSheets} sheet(s) will be printed.") },
+            confirmButton = {
+                TextButton(onClick = { confirmAll = false; onIntent(AdminIntent.CancelAllPrintJobs) }) { Text("Cancel all prints") }
+            },
+            dismissButton = { TextButton(onClick = { confirmAll = false }) { Text("Keep") } },
+        )
     }
 }
 

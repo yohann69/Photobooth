@@ -58,3 +58,18 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("UPDATE session_logs SET layoutType = NULL WHERE layoutType NOT IN ($current)")
     }
 }
+
+/** The welcome-screen slideshow became a per-event setting. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN attractSlideshow INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
+/** Events carry the date they take place on, separate from when they were created in the app. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN eventDate INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE events SET eventDate = createdAt - (createdAt % 86400000)")
+    }
+}

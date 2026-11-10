@@ -48,12 +48,12 @@ import java.io.File
 fun AttractScreen(state: BoothUiState, onStart: () -> Unit) {
     val pulse = rememberInfiniteTransition(label = "pulse")
     val scale by pulse.animateFloat(
-        initialValue = 1f, targetValue = 1.07f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale",
+        initialValue = 1f, targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(tween(2_200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale",
     )
     val glow by pulse.animateFloat(
-        initialValue = 0.6f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "glow",
+        initialValue = 0.85f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2_200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "glow",
     )
 
     Box(
@@ -78,7 +78,6 @@ fun AttractScreen(state: BoothUiState, onStart: () -> Unit) {
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("BIENVENUE", color = BoothColors.AccentAlt, fontSize = (titleSp * 0.35f).sp, fontWeight = FontWeight.Bold, letterSpacing = 8.sp)
                 Text(
                     state.event?.name ?: "Photobooth",
                     color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,
@@ -96,7 +95,7 @@ fun AttractScreen(state: BoothUiState, onStart: () -> Unit) {
                         .background(BoothColors.Accent.copy(alpha = glow), RoundedCornerShape(50))
                         .padding(horizontal = 80.dp, vertical = 32.dp),
                 ) {
-                    Text("TOUCHER POUR COMMENCER", color = BoothColors.OnAccent, fontSize = (titleSp * 0.42f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
+                    Text("PRENDRE DES PHOTOS", color = BoothColors.OnAccent, fontSize = (titleSp * 0.42f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
                 }
             }
         }

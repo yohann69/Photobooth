@@ -37,10 +37,10 @@ class EventRepository @Inject constructor(
     suspend fun setActive(id: String) = dao.setActive(id)
 
     /** Creates the event's folder tree under Pictures/Photobooth and the event itself. */
-    suspend fun createWithStorage(name: String, makeActive: Boolean = true): EventEntity {
+    suspend fun createWithStorage(name: String, eventDate: Long, makeActive: Boolean = true): EventEntity {
         val id = UUID.randomUUID().toString()
         val dir = withContext(Dispatchers.IO) { storage.createEventDirectory(id, name) }
-        return createEvent(name, dir.toUri().toString(), makeActive, id = id)
+        return createEvent(name, dir.toUri().toString(), makeActive, id = id, eventDate = eventDate)
     }
 
     /**
@@ -53,11 +53,13 @@ class EventRepository @Inject constructor(
         makeActive: Boolean = true,
         now: Long = System.currentTimeMillis(),
         id: String = UUID.randomUUID().toString(),
+        eventDate: Long = 0,
     ): EventEntity = db.withTransaction {
         val event = EventEntity(
             id = id,
             name = name,
             createdAt = now,
+            eventDate = eventDate,
             storageDirectoryUri = storageDirectoryUri,
             isActive = false,
         )

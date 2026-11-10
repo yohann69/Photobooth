@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
-enum class CameraStrategy { USB_PTP, CCAPI, UVC_PLUS_PTP, UVC_WEBCAM, TABLET_CAMERA }
+/** Every strategy takes a real still with the camera itself; the live view is only a preview. */
+enum class CameraStrategy { USB_PTP, CCAPI, UVC_PLUS_PTP, TABLET_CAMERA }
 
 data class CameraDescriptor(
     val name: String,
@@ -38,6 +39,9 @@ interface CameraController {
 
     /** Captures a full-resolution JPEG into [targetFile]; live view resumes automatically. */
     suspend fun captureHighResPhoto(targetFile: File): Result<File>
+
+    /** Runs autofocus (and metering) ahead of the shutter so the shot itself is instant; failures are harmless. */
+    suspend fun prepareCapture() {}
 
     /** Human-readable battery level of the camera body (or tablet for the fallback); null when unknown. */
     suspend fun readBatteryLevel(): String? = null

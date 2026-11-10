@@ -69,6 +69,10 @@ class PrintQueueRepository @Inject constructor(
         job.copy(status = PrintJobStatus.FAILED, lastError = error, updatedAt = System.currentTimeMillis()),
     )
 
+    suspend fun cancel(id: Long): Boolean = dao.cancel(id, System.currentTimeMillis()) > 0
+
+    suspend fun cancelAll(): Int = dao.cancelAll(System.currentTimeMillis())
+
     /** Jobs left PRINTING by a crash or power loss go back to the queue. */
     suspend fun recoverInterrupted(): Int =
         dao.requeue(PrintJobStatus.PRINTING, PrintJobStatus.QUEUED, System.currentTimeMillis())

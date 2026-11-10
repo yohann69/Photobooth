@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import com.photobooth.data.db.entity.EventEntity
 import com.photobooth.data.db.entity.EventLayoutConfigEntity
 import com.photobooth.domain.model.LayoutType
-import com.photobooth.domain.model.PhotoFilterType
 import java.io.File
 
 enum class BoothStep { ATTRACT, SELECT_LAYOUT, LIVE, COUNTDOWN, CAPTURING, REVIEW, FINAL, PRINTING }
@@ -27,26 +26,23 @@ data class BoothUiState(
     val slotIndex: Int = 0,
     val countdown: Int = 0,
     val smile: Boolean = false,
-    val flashToken: Int = 0,
     val reviewFile: File? = null,
     /** Final composition with the new photo already in its slot; shown instead of the raw photo while reviewing. */
     val reviewPreview: Bitmap? = null,
 
-    val filter: PhotoFilterType = PhotoFilterType.ORIGINAL,
-    /** Looks the event allows; the guest bar is hidden when empty or only ORIGINAL. */
-    val filters: List<PhotoFilterType> = emptyList(),
     val copies: Int = 1,
     val maxCopies: Int = 5,
     val finalPreview: Bitmap? = null,
     val isRendering: Boolean = false,
 
     val share: ShareUi? = null,
+    val shareLoading: Boolean = false,
+    val shareFailed: Boolean = false,
     val thanksSecondsLeft: Int = 15,
     val printWaiting: Boolean = false,
     val message: String? = null,
 ) {
     val totalSlots: Int get() = layout?.photoCount ?: 0
-    val showFilterBar: Boolean get() = filters.any { it != PhotoFilterType.ORIGINAL }
 }
 
 sealed interface BoothIntent {
@@ -55,7 +51,6 @@ sealed interface BoothIntent {
     data object TakePhoto : BoothIntent
     data object KeepPhoto : BoothIntent
     data object RetakePhoto : BoothIntent
-    data class SetFilter(val filter: PhotoFilterType) : BoothIntent
     data class SetCopies(val copies: Int) : BoothIntent
     data object ConfirmPrint : BoothIntent
     data object BackToStart : BoothIntent

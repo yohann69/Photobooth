@@ -76,6 +76,8 @@ class UvcPlusPtpEngine(
 
     override suspend fun captureHighResPhoto(targetFile: File): Result<File> = ptp.captureHighResPhoto(targetFile)
 
+    override suspend fun prepareCapture() = ptp.prepareCapture()
+
     override suspend fun deleteFromCamera(file: File): Boolean = ptp.deleteFromCamera(file)
 
     override suspend fun disconnect() {

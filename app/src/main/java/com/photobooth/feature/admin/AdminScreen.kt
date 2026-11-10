@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -28,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
-fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit) {
+fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit, onOpenSettings: () -> Unit) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) {
@@ -55,6 +57,8 @@ fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                OutlinedButton(onClick = onOpenSettings) { Text("App settings") }
+                Spacer(Modifier.width(12.dp))
                 Button(onClick = onExit) { Text("Exit to guest screen") }
             }
             HorizontalDivider()
@@ -90,8 +94,8 @@ fun AdminScreen(viewModel: AdminViewModel, onExit: () -> Unit) {
                     when (state.tab) {
                         AdminTab.DASHBOARD -> DashboardTab(state, viewModel::onIntent)
                         AdminTab.EVENTS -> EventsTab(state, viewModel::onIntent)
+                        AdminTab.EVENT_SETTINGS -> EventSettingsTab(state, viewModel::onIntent)
                         AdminTab.LAYOUTS -> LayoutsTab(state, viewModel::onIntent, viewModel::renderPreview, viewModel::frameSize)
-                        AdminTab.SETTINGS -> SettingsTab(state, viewModel::onIntent)
                     }
                 }
             }

@@ -15,7 +15,10 @@ import com.photobooth.data.settings.SettingsRepository
 import com.photobooth.data.storage.EventStorage
 import com.photobooth.diagnostics.DiagnosticsSnapshot
 import com.photobooth.diagnostics.HardwareDiagnostics
+import com.photobooth.domain.model.LayoutType
 import com.photobooth.print.PrintController
+import com.photobooth.print.dnp.DnpPrinterLink
+import com.photobooth.print.dnp.DnpTestSheet
 import com.photobooth.render.DummyPhotos
 import com.photobooth.render.PhotoCompositorEngine
 import com.photobooth.render.PhotoDecoder
@@ -56,6 +59,7 @@ class AdminViewModel @Inject constructor(
     private val diagnostics: HardwareDiagnostics,
     private val camera: UniversalCanonManager,
     private val printController: PrintController,
+    private val dnp: DnpPrinterLink,
 ) : ViewModel() {
 
     private data class Local(val tab: AdminTab = AdminTab.DASHBOARD, val message: String? = null, val selfTest: SelfTestState = SelfTestState.Idle)
@@ -93,7 +97,7 @@ class AdminViewModel @Inject constructor(
         emitAll(diagnostics.observe())
     }
 
-    val state: StateFlow<AdminUiState> = combine(data, diagnosticsFlow, local, printController.status) { d, diag, l, printStatus ->
+    val state: StateFlow<AdminUiState> = combine(data, diagnosticsFlow, local, printController.status, dnp.state) { d, diag, l, printStatus, dnpState ->
         AdminUiState(
             tab = l.tab,
             events = d.rows,
@@ -103,6 +107,7 @@ class AdminViewModel @Inject constructor(
             diagnostics = diag,
             selfTest = l.selfTest,
             printStatus = printStatus,
+            dnp = dnpState,
             message = l.message,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AdminUiState())
@@ -116,7 +121,7 @@ class AdminViewModel @Inject constructor(
             AdminIntent.RefreshEvents -> refreshTick.update { it + 1 }
             AdminIntent.DismissMessage -> local.update { it.copy(message = null) }
 
-            is AdminIntent.CreateEvent -> createEvent(intent.name)
+            is AdminIntent.CreateEvent -> createEvent(intent.name, intent.dateUtc)
             is AdminIntent.SwitchEvent -> launch { events.setActive(intent.eventId) }
             is AdminIntent.UpdateActiveEvent -> launch { events.getActive()?.let { events.update(intent.transform(it)) } }
 
@@ -147,15 +152,26 @@ class AdminViewModel @Inject constructor(
             is AdminIntent.SetKioskMode -> launch { settingsRepository.setKioskMode(intent.enabled) }
             is AdminIntent.SetKeepScreenOn -> launch { settingsRepository.setKeepScreenOn(intent.enabled) }
             is AdminIntent.SetHideSystemBars -> launch { settingsRepository.setHideSystemBars(intent.enabled) }
-            is AdminIntent.SetAttractSlideshow -> launch { settingsRepository.setAttractSlideshow(intent.enabled) }
 
-            is AdminIntent.SavePrinter -> launch {
-                settingsRepository.setPrinter(intent.connection, intent.ip.trim(), intent.port)
-                settingsRepository.setPrinterModel(intent.model)
-                settingsRepository.setRollCapacity(intent.rollCapacity)
-                settingsRepository.setPrintOptions(intent.ippPort, intent.ippPath, intent.finish, intent.dryRun)
+            is AdminIntent.SetDryRun -> launch {
+                settingsRepository.setDryRun(intent.enabled)
                 printController.kick()
-                post("Printer settings saved")
+            }
+            is AdminIntent.SetDnpOrientation -> launch {
+                settingsRepository.setDnpOrientation(intent.flipVertical, intent.mirror, intent.portraitClockwise)
+            }
+            is AdminIntent.PrintTestSheet -> printTestSheet(intent.portrait)
+            is AdminIntent.SaveUpload -> launch {
+                settingsRepository.setUpload(intent.baseUrl, intent.token)
+                post("Upload server saved")
+            }
+            is AdminIntent.CancelPrintJob -> launch {
+                printController.cancel(intent.jobId)
+                post("Print job cancelled")
+            }
+            AdminIntent.CancelAllPrintJobs -> launch {
+                printController.cancelAll()
+                post("All waiting prints cancelled")
             }
             AdminIntent.ReplaceRoll -> launch {
                 settingsRepository.setRollBaseline(printQueue.totalPrinted())
@@ -186,12 +202,13 @@ class AdminViewModel @Inject constructor(
 
     private fun post(message: String) = local.update { it.copy(message = message) }
 
-    private fun createEvent(name: String) = launch {
+    private fun createEvent(name: String, dateUtc: Long) = launch {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return@launch post("Event name cannot be empty")
-        runCatching { events.createWithStorage(trimmed) }
+        runCatching { events.createWithStorage(trimmed, dateUtc) }
             .onSuccess {
                 refreshTick.update { n -> n + 1 }
+                local.update { l -> l.copy(tab = AdminTab.EVENT_SETTINGS) }
                 post("Event \"${it.name}\" created and activated")
             }
             .onFailure { post("Could not create event: ${it.message}") }
@@ -227,6 +244,17 @@ class AdminViewModel @Inject constructor(
                 post("Test frame generated for ${type.name}")
             }
             .onFailure { post("Test frame failed: ${it.message}") }
+    }
+
+    private fun printTestSheet(portrait: Boolean) = withActiveEvent { event ->
+        val file = File(storage.subfolder(event, EventStorage.COMPOSITED_PRINTS), "${EventStorage.TEST_PREFIX}SHEET_${if (portrait) "PORTRAIT" else "LANDSCAPE"}.jpg")
+        withContext(Dispatchers.IO) {
+            val bitmap = DnpTestSheet.render(portrait)
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+            bitmap.recycle()
+        }
+        printController.submit(event.id, null, file, 1, if (portrait) LayoutType.PORTRAIT_SINGLE else LayoutType.LANDSCAPE_SINGLE)
+        post("Test sheet queued (${if (portrait) "portrait" else "landscape"})")
     }
 
     private fun changePin(intent: AdminIntent.ChangePin) = launch {

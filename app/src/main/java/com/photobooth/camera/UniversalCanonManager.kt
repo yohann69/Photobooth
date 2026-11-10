@@ -18,8 +18,6 @@ import com.photobooth.camera.ccapi.CanonCcapiEngine
 import com.photobooth.camera.ccapi.CcapiDiscovery
 import com.photobooth.camera.ptp.CanonUsbPtpEngine
 import com.photobooth.camera.uvc.UvcPlusPtpEngine
-import com.photobooth.camera.uvc.UsbUvcEngine
-import com.photobooth.camera.uvc.UvcWebcamEngine
 import com.photobooth.core.PhotoboothLog.TAG
 import com.photobooth.data.settings.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -84,6 +82,11 @@ class UniversalCanonManager @Inject constructor(
 
     private val _activeStrategy = MutableStateFlow<CameraStrategy?>(null)
     val activeStrategy: StateFlow<CameraStrategy?> = _activeStrategy.asStateFlow()
+
+    // Why no external camera is in use (null when none is plugged in or one is working); shown in the admin diagnostics.
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+    @Volatile private var lastFailure: String? = null
 
     @Volatile private var active: CameraController? = null
     @Volatile var forcedStrategy: CameraStrategy? = null
@@ -195,6 +198,7 @@ class UniversalCanonManager @Inject constructor(
             while (currentCoroutineContext().isActive) {
                 if (current == null) {
                     _state.value = CameraConnectionState.Connecting("Searching for cameras")
+                    lastFailure = null
                     current = connectBest(allowFallback = true)
                     if (current == null) {
                         _state.value = CameraConnectionState.Failed("No camera available")
@@ -272,6 +276,7 @@ class UniversalCanonManager @Inject constructor(
     // ---- Strategy selection ------------------------------------------------------------------
 
     private suspend fun connectBest(allowFallback: Boolean): CameraController? {
+        _notice.value = null
         val forced = forcedStrategy
         fun allowed(s: CameraStrategy) = forced == null || forced == s
 
@@ -299,16 +304,7 @@ class UniversalCanonManager @Inject constructor(
             }
         }
 
-        if (allowed(CameraStrategy.UVC_WEBCAM)) {
-            if (Camera2Source.hasExternalCamera(context)) {
-                tryConnect(UvcWebcamEngine(context), "UVC_WEBCAM(camera2)")?.let { return it }
-            }
-            // Many tablets do not expose USB cameras through Camera2, so drive the UVC device directly.
-            val uvc = findUvcDevice()
-            if (uvc != null && ensureUsbPermission(uvc)) {
-                tryConnect(UsbUvcEngine(context, usbManager, uvc), "UVC_WEBCAM(usb)")?.let { return it }
-            }
-        }
+        _notice.value = diagnoseMissingCamera(canon)
 
         if (allowFallback) return tryConnect(TabletCamera2Engine(context), "TABLET_CAMERA")
         return null
@@ -321,7 +317,8 @@ class UniversalCanonManager @Inject constructor(
             Log.i(TAG, "UniversalCanonManager: $label connected in ${SystemClock.elapsedRealtime() - started} ms")
             engine
         } else {
-            Log.w(TAG, "UniversalCanonManager: $label unavailable: ${result.exceptionOrNull()?.message}")
+            lastFailure = result.exceptionOrNull()?.message
+            Log.w(TAG, "UniversalCanonManager: $label unavailable: $lastFailure")
             runCatching { engine.disconnect() }
             null
         }
@@ -329,6 +326,19 @@ class UniversalCanonManager @Inject constructor(
 
     private fun findCanonUsbDevice(): UsbDevice? =
         usbManager.deviceList.values.firstOrNull { it.vendorId == CANON_VENDOR_ID && hasPtpInterface(it) }
+
+    /** Only real stills are accepted, so a camera that exposes just a video stream is reported rather than used. */
+    private fun diagnoseMissingCamera(canonWithPtp: UsbDevice?): String? {
+        val devices = usbManager.deviceList.values
+        return when {
+            canonWithPtp != null -> "Appareil Canon détecté mais connexion photo impossible: ${lastFailure ?: "raison inconnue"}"
+            devices.any { it.vendorId == CANON_VENDOR_ID } ->
+                "Appareil Canon branché sans mode photo USB (PTP). Mettez-le en mode photo normal, pas en mode webcam."
+            findUvcDevice() != null ->
+                "Un appareil en mode webcam est branché : il ne fournit qu'un flux vidéo, pas de vraie photo. Il est ignoré."
+            else -> null
+        }
+    }
 
     private fun findUvcDevice(): UsbDevice? =
         usbManager.deviceList.values
@@ -352,6 +362,7 @@ class UniversalCanonManager @Inject constructor(
         Log.i(TAG, "UniversalCanonManager: requesting USB permission for ${device.describe()}")
         usbManager.requestPermission(device, pi)
         val granted = withTimeoutOrNull(PERMISSION_TIMEOUT_MS) { pending.await() } ?: false
+        Log.i(TAG, "UniversalCanonManager: USB permission for ${device.describe()} granted=$granted")
         permissionResults.remove(device.deviceName)
         if (!granted) deniedDevices.add(device.deviceName)
         return granted
@@ -364,6 +375,10 @@ class UniversalCanonManager @Inject constructor(
     override suspend fun captureHighResPhoto(targetFile: File): Result<File> {
         val engine = active ?: return Result.failure(IllegalStateException("No camera connected"))
         return captureMutex.withLock { engine.captureHighResPhoto(targetFile) }
+    }
+
+    override suspend fun prepareCapture() {
+        active?.prepareCapture()
     }
 
     override suspend fun readBatteryLevel(): String? = active?.readBatteryLevel()

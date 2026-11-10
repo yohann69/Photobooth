@@ -1,6 +1,7 @@
 package com.photobooth.data.seed
 
 import android.util.Log
+import com.photobooth.core.EventDates
 import com.photobooth.core.PhotoboothLog.TAG
 import com.photobooth.data.repository.EventRepository
 import com.photobooth.data.repository.LayoutRepository
@@ -31,7 +32,7 @@ class DatabaseSeeder @Inject constructor(
         settings.ensureDefaultPin()
 
         if (events.count() == 0) {
-            val event = events.createWithStorage("Default Event")
+            val event = events.createWithStorage("Default Event", EventDates.todayUtc())
             Log.i(TAG, "DbSeeder: created default event id=${event.id} storage=${event.storageDirectoryUri}")
         }
         if (events.getActive() == null) events.getAll().firstOrNull()?.let { events.setActive(it.id) }

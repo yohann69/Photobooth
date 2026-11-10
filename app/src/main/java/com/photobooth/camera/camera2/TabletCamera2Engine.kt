@@ -49,6 +49,8 @@ class TabletCamera2Engine(context: Context) : CameraController {
             .onFailure { Log.w(TAG, "TabletCamera2Engine: capture failed: ${it.message}") }
     }
 
+    override suspend fun prepareCapture() = source.prepareStill()
+
     override suspend fun readBatteryLevel(): String? {
         val percent = appContext.getSystemService(BatteryManager::class.java)
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)

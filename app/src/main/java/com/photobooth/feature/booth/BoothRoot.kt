@@ -47,7 +47,6 @@ fun BoothRoot(viewModel: BoothSessionViewModel, onAdminRequested: () -> Unit) {
                 )
                 BoothScreen.FINAL -> FinalSummaryScreen(
                     state,
-                    onFilter = { send(BoothIntent.SetFilter(it)) },
                     onCopies = { send(BoothIntent.SetCopies(it)) },
                     onConfirm = { send(BoothIntent.ConfirmPrint) },
                     onCancel = { send(BoothIntent.BackToStart) },

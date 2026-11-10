@@ -13,6 +13,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
@@ -76,6 +77,9 @@ internal class Camera2Source(
 
     @Volatile private var closed = false
     @Volatile private var pendingStill: PendingStill? = null
+    @Volatile private var focusWaiter: CompletableDeferred<Unit>? = null
+    private var autoFlash = false
+    private var hasAutofocus = false
     private var sensorOrientation = 0
     private var lensFacing = CameraCharacteristics.LENS_FACING_FRONT
     private var frameCounter = 0
@@ -99,6 +103,9 @@ internal class Camera2Source(
         val stillSize = map.getOutputSizes(ImageFormat.JPEG).maxByOrNull { it.width.toLong() * it.height }
             ?: throw IOException("Camera $id has no JPEG output")
         val previewSize = choosePreviewSize(map.getOutputSizes(ImageFormat.YUV_420_888), stillSize)
+        autoFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+            CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH in (characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf())
+        hasAutofocus = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE in (characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf())
 
         val t = HandlerThread("PhotoboothCamera2").also { it.start() }
         thread = t
@@ -122,7 +129,7 @@ internal class Camera2Source(
                 addTarget(preview.surface)
                 applyAutoModes(this, characteristics)
             }
-            s.setRepeatingRequest(request.build(), null, h)
+            s.setRepeatingRequest(request.build(), previewCallback, h)
         } catch (e: Throwable) {
             close()
             throw when (e) {
@@ -271,6 +278,65 @@ internal class Camera2Source(
 
     // ---- Still capture -----------------------------------------------------------------------
 
+    private val previewCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            val waiter = focusWaiter ?: return
+            val af = result.get(CaptureResult.CONTROL_AF_STATE)
+            val ae = result.get(CaptureResult.CONTROL_AE_STATE)
+            val focused = !hasAutofocus || af == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED || af == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+            val metered = ae == null || ae == CaptureResult.CONTROL_AE_STATE_CONVERGED || ae == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED ||
+                ae == CaptureResult.CONTROL_AE_STATE_LOCKED
+            if (focused && metered) waiter.complete(Unit)
+        }
+    }
+
+    /** Locks focus and exposure (and decides on flash) ahead of the shot; gives up quietly after a short timeout. */
+    suspend fun prepareStill() {
+        val cam = device ?: return
+        val s = session ?: return
+        val preview = previewReader ?: return
+        val h = handler ?: return
+        if (lensFacing == CameraCharacteristics.LENS_FACING_EXTERNAL) return
+        val waiter = CompletableDeferred<Unit>()
+        focusWaiter = waiter
+        try {
+            val trigger = cam.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(preview.surface)
+                if (hasAutofocus) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                }
+                set(CaptureRequest.CONTROL_AE_MODE, if (autoFlash) CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH else CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+            }
+            s.capture(trigger.build(), previewCallback, h)
+            val done = kotlinx.coroutines.withTimeoutOrNull(PREPARE_TIMEOUT_MS) { waiter.await() } != null
+            Log.i(TAG, "Camera2Source: autofocus/exposure ready=$done flash=$autoFlash")
+        } catch (e: CameraAccessException) {
+            Log.w(TAG, "Camera2Source: prepareStill failed: ${e.message}")
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Camera2Source: prepareStill failed: ${e.message}")
+        } finally {
+            focusWaiter = null
+        }
+    }
+
+    /** Releases the focus lock so the preview goes back to continuous autofocus. */
+    private fun resumeContinuousFocus() {
+        val cam = device ?: return
+        val s = session ?: return
+        val preview = previewReader ?: return
+        if (!hasAutofocus || lensFacing == CameraCharacteristics.LENS_FACING_EXTERNAL) return
+        runCatching {
+            val cancel = cam.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(preview.surface)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+            }
+            s.capture(cancel.build(), null, handler)
+        }
+    }
+
     suspend fun captureJpeg(target: File, timeoutMs: Long = STILL_TIMEOUT_MS): File = stillMutex.withLock {
         val cam = device ?: throw IOException("Camera not open")
         val s = session ?: throw IOException("Camera session not ready")
@@ -286,7 +352,7 @@ internal class Camera2Source(
                 set(CaptureRequest.JPEG_QUALITY, STILL_JPEG_QUALITY.toByte())
                 if (lensFacing != CameraCharacteristics.LENS_FACING_EXTERNAL) {
                     set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    set(CaptureRequest.CONTROL_AE_MODE, if (autoFlash) CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH else CaptureRequest.CONTROL_AE_MODE_ON)
                 }
             }
             s.capture(request.build(), object : CameraCaptureSession.CaptureCallback() {
@@ -299,6 +365,7 @@ internal class Camera2Source(
             withTimeout(timeoutMs) { result.await() }
         } finally {
             pendingStill = null
+            resumeContinuousFocus()
         }
     }
 
@@ -368,6 +435,7 @@ internal class Camera2Source(
         private const val PREVIEW_JPEG_QUALITY = 80
         private const val STILL_JPEG_QUALITY = 95
         private const val STILL_TIMEOUT_MS = 8_000L
+        private const val PREPARE_TIMEOUT_MS = 2_500L
 
         fun hasExternalCamera(context: Context): Boolean {
             val cm = context.getSystemService(CameraManager::class.java)

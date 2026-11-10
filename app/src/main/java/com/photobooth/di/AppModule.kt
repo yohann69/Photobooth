@@ -9,6 +9,8 @@ import com.photobooth.data.db.MIGRATION_1_2
 import com.photobooth.data.db.MIGRATION_2_3
 import com.photobooth.data.db.MIGRATION_3_4
 import com.photobooth.data.db.MIGRATION_4_5
+import com.photobooth.data.db.MIGRATION_5_6
+import com.photobooth.data.db.MIGRATION_6_7
 import com.photobooth.data.db.dao.EventDao
 import com.photobooth.data.db.dao.EventLayoutConfigDao
 import com.photobooth.data.db.dao.PrintJobDao
@@ -54,7 +56,7 @@ object AppModule {
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): PhotoboothDatabase =
         Room.databaseBuilder(context, PhotoboothDatabase::class.java, PhotoboothDatabase.NAME)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
 
     @Provides fun eventDao(db: PhotoboothDatabase): EventDao = db.eventDao()

@@ -19,18 +19,17 @@ import com.photobooth.data.repository.EventRepository
 import com.photobooth.data.repository.LayoutRepository
 import com.photobooth.data.repository.PrintQueueRepository
 import com.photobooth.data.repository.SessionLogRepository
-import com.photobooth.data.settings.SettingsRepository
 import com.photobooth.print.PrintController
 import com.photobooth.print.PrintStatus
 import com.photobooth.data.storage.EventStorage
 import com.photobooth.render.DummyPhotos
 import com.photobooth.render.PhotoCompositorEngine
 import com.photobooth.render.PhotoDecoder
-import com.photobooth.domain.model.PhotoFilterType
 import com.photobooth.render.PhotoSupplier
-import com.photobooth.share.GalleryTheme
-import com.photobooth.share.LocalGalleryHttpServer
+import com.photobooth.domain.model.LayoutType
 import com.photobooth.share.QrCodes
+import com.photobooth.share.UploadContext
+import com.photobooth.share.UploadManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -39,8 +38,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,10 +58,9 @@ class BoothSessionViewModel @Inject constructor(
     private val sessionLogs: SessionLogRepository,
     private val storage: EventStorage,
     private val compositor: PhotoCompositorEngine,
-    private val share: LocalGalleryHttpServer,
+    private val uploads: UploadManager,
     private val printController: PrintController,
     private val audio: BoothAudio,
-    settings: SettingsRepository,
 ) : ViewModel() {
 
     val frames = camera.liveViewFrameFlow
@@ -75,7 +71,6 @@ class BoothSessionViewModel @Inject constructor(
     private var session: SessionLogEntity? = null
     private var sessionFinished = false
     private var retakes = 0
-    private var shareId: String? = null
     private var countdownJob: Job? = null
     private var renderJob: Job? = null
     private var thanksJob: Job? = null
@@ -93,14 +88,8 @@ class BoothSessionViewModel @Inject constructor(
         }
         viewModelScope.launch {
             events.observeActive().collect { e ->
-                _state.update { it.copy(event = e) }
+                _state.update { it.copy(event = e, slideshowEnabled = e?.attractSlideshow ?: true) }
                 if (_state.value.step == BoothStep.ATTRACT) refreshSlideshow()
-            }
-        }
-        viewModelScope.launch {
-            settings.settings.map { it.attractSlideshow }.distinctUntilChanged().collect { enabled ->
-                _state.update { it.copy(slideshowEnabled = enabled) }
-                refreshSlideshow()
             }
         }
         viewModelScope.launch {
@@ -123,11 +112,7 @@ class BoothSessionViewModel @Inject constructor(
             BoothIntent.TakePhoto -> if (_state.value.step == BoothStep.LIVE) beginCountdown()
             BoothIntent.KeepPhoto -> keepPhoto()
             BoothIntent.RetakePhoto -> retakePhoto()
-            is BoothIntent.SetFilter -> {
-                _state.update { it.copy(filter = intent.filter) }
-                renderFinalPreview()
-            }
-            is BoothIntent.SetCopies -> _state.update { it.copy(copies = intent.copies.coerceIn(1, it.maxCopies)) }
+            is BoothIntent.SetCopies -> _state.update { it.copy(copies = intent.copies.coerceIn(0, it.maxCopies)) }
             BoothIntent.ConfirmPrint -> confirmPrint()
             BoothIntent.BackToStart -> resetToAttract(abandon = true)
             BoothIntent.Abort -> if (_state.value.step != BoothStep.ATTRACT) resetToAttract(abandon = true)
@@ -148,15 +133,11 @@ class BoothSessionViewModel @Inject constructor(
             sessionFinished = false
             session = sessionLogs.start(event.id, null)
             Log.i(TAG, "BoothSession: started ${session?.id} event='${event.name}' layouts=${enabled.size}")
-            val filters = event.enabledFilters.distinct()
-            val startFilter = if (filters.isEmpty() || PhotoFilterType.ORIGINAL in filters) PhotoFilterType.ORIGINAL else filters.first()
             _state.update {
                 it.copy(
                     layouts = enabled,
                     maxCopies = event.maxPrintsPerSession.coerceIn(1, MAX_COPIES),
                     copies = 1,
-                    filters = filters,
-                    filter = startFilter,
                     finalPreview = null,
                     share = null,
                     message = null,
@@ -205,24 +186,28 @@ class BoothSessionViewModel @Inject constructor(
             val seconds = event.countdownSeconds.coerceAtLeast(1)
             _state.update { it.copy(smile = false, message = null) }
             go(BoothStep.COUNTDOWN)
+            var focus: Job? = null
             for (n in seconds downTo 1) {
                 _state.update { it.copy(countdown = n) }
+                if (n == minOf(seconds, FOCUS_AT_SECOND)) {
+                    focus = launch { runCatching { camera.prepareCapture() } }
+                }
                 audio.tick(n)
                 delay(1_000)
             }
             _state.update { it.copy(smile = true, countdown = 0) }
             audio.smile()
             delay(SMILE_MS)
+            focus?.join()
 
             val slot = _state.value.slotIndex
             val file = newPhotoFile(event, slot)
             capturingFile = file
-            _state.update { it.copy(flashToken = it.flashToken + 1) }
-            audio.shutter()
             go(BoothStep.CAPTURING)
             camera.captureHighResPhoto(file)
                 .onSuccess {
                     Log.i(TAG, "BoothSession: slot ${slot + 1} captured ${it.name} ${it.length()} bytes")
+                    uploadContext()?.let { ctx -> uploads.scheduleShot(ctx, slot + 1, it) }
                     val composition = renderComposition(it, slot)
                     _state.update { cur -> cur.copy(reviewFile = it, reviewPreview = composition, smile = false) }
                     go(BoothStep.REVIEW)
@@ -246,7 +231,7 @@ class BoothSessionViewModel @Inject constructor(
         val cfg = s.layout ?: return null
         return runCatching {
             withContext(Dispatchers.Default) {
-                compositor.renderProgressivePreview(cfg, FINAL_PREVIEW_SCALE, s.photos, newPhoto, newIndex, s.filter)
+                compositor.renderProgressivePreview(cfg, FINAL_PREVIEW_SCALE, s.photos, newPhoto, newIndex)
             }
         }.onFailure {
             if (it is kotlinx.coroutines.CancellationException) throw it
@@ -281,6 +266,7 @@ class BoothSessionViewModel @Inject constructor(
             val clearedOnCamera = camera.deleteFromCamera(file)
             Log.i(TAG, "BoothSession: rejected ${file.name} deletedFromTablet=$deleted existsAfter=${file.exists()} cameraCopyRemoved=$clearedOnCamera")
             retakes++
+            session?.let { uploads.cancelShot(it.id, s.slotIndex + 1) }
             val without = renderComposition(null, s.slotIndex)
             Log.i(TAG, "BoothSession: progressive composition re-rendered without ${file.name} (ok=${without != null})")
             _state.update { it.copy(reviewFile = null, reviewPreview = without) }
@@ -303,7 +289,7 @@ class BoothSessionViewModel @Inject constructor(
             _state.update { it.copy(isRendering = true) }
             val bitmap = runCatching {
                 withContext(Dispatchers.Default) {
-                    compositor.render(cfg, FINAL_PREVIEW_SCALE, photoSupplier(s.photos), filter = s.filter)
+                    compositor.render(cfg, FINAL_PREVIEW_SCALE, photoSupplier(s.photos))
                 }
             }.onFailure {
                 if (it is kotlinx.coroutines.CancellationException) throw it
@@ -328,7 +314,7 @@ class BoothSessionViewModel @Inject constructor(
             val printFile = File(storage.subfolder(event, EventStorage.COMPOSITED_PRINTS), "PRINT_${stamp}_${cfg.layoutType.name}.jpg")
             val rendered = runCatching {
                 withContext(Dispatchers.Default) {
-                    compositor.renderPrint(cfg, s.photos, s.filter, montage)
+                    compositor.renderPrint(cfg, s.photos, montage)
                     montage.copyTo(printFile, overwrite = true)
                 }
             }
@@ -343,41 +329,63 @@ class BoothSessionViewModel @Inject constructor(
                 return@launch
             }
 
-            val jobId = printController.submit(event.id, current.id, printFile, s.copies, cfg.layoutType)
-            Log.i(TAG, "BoothSession: print job $jobId queued copies=${s.copies} filter=${s.filter} file=${printFile.name}")
+            if (s.copies > 0) {
+                val jobId = printController.submit(event.id, current.id, printFile, s.copies, cfg.layoutType)
+                Log.i(TAG, "BoothSession: print job $jobId queued copies=${s.copies} file=${printFile.name}")
+            } else {
+                Log.i(TAG, "BoothSession: no print requested, digital copy only (file=${printFile.name})")
+            }
 
             val photoFiles = s.photos.filterNotNull()
             MediaScannerConnection.scanFile(
                 context, (photoFiles + printFile).map { it.absolutePath }.toTypedArray(), null, null,
             )
             Log.i(TAG, "BoothSession: session ${current.id} validated: ${photoFiles.size} originals + ${montage.name} kept in ${montage.parentFile?.name}")
-            var shareUi: ShareUi? = null
-            if (event.enableDigitalQRShare) {
-                val handle = share.register(current.id, montage, photoFiles, GalleryTheme.from(event))
-                if (handle == null) {
-                    post("Wi-Fi indisponible : partage par QR code désactivé")
-                } else {
-                    shareId = handle.sessionId
-                    val qr = withContext(Dispatchers.Default) { QrCodes.bitmap(handle.url, QR_SIZE_PX) }
-                    shareUi = ShareUi(handle.url, qr)
-                    Log.i(TAG, "BoothSession: share url=${handle.url}")
-                }
-            }
-            _state.update { it.copy(isRendering = false, share = shareUi) }
+            val sharing = uploads.isEnabledFor(event)
+            _state.update { it.copy(isRendering = false, share = null, shareLoading = sharing, shareFailed = false) }
+            if (sharing) publishMontage(current.id, cfg.layoutType, montage)
 
             val finished = current.copy(
                 photosCaptured = photoFiles.size,
                 retakes = retakes,
                 printsRequested = s.copies,
-                sharedViaQr = shareUi != null,
+                sharedViaQr = sharing,
                 layoutType = cfg.layoutType,
             )
             session = finished
             sessionLogs.finish(finished, SessionOutcome.COMPLETED)
             sessionFinished = true
+            uploads.complete(current.id)
 
             startThanksTimer()
         }
+    }
+
+    /** Uploads the montage in the background; the QR code appears as soon as the server returns the link. */
+    private fun publishMontage(sessionId: String, layoutType: LayoutType, montage: File) {
+        val event = _state.value.event ?: return
+        viewModelScope.launch {
+            val result = uploads.uploadMontage(UploadContext.of(sessionId, event, layoutType), montage)
+            if (session?.id != sessionId) return@launch // already back on the welcome screen
+            val url = result.getOrNull()
+            if (url == null) {
+                Log.w(TAG, "BoothSession: montage upload failed: ${result.exceptionOrNull()?.message}")
+                _state.update { it.copy(shareLoading = false, shareFailed = true) }
+                return@launch
+            }
+            val qr = withContext(Dispatchers.Default) { QrCodes.bitmap(url, QR_SIZE_PX) }
+            Log.i(TAG, "BoothSession: share url=$url")
+            _state.update { it.copy(share = ShareUi(url, qr), shareLoading = false) }
+        }
+    }
+
+    private fun uploadContext(): UploadContext? {
+        val s = _state.value
+        val event = s.event ?: return null
+        val id = session?.id ?: return null
+        val layoutType = s.layout?.layoutType ?: return null
+        if (!event.enableDigitalQRShare) return null
+        return UploadContext.of(id, event, layoutType)
     }
 
     private fun startThanksTimer() {
@@ -409,12 +417,11 @@ class BoothSessionViewModel @Inject constructor(
                 sessionLogs.finish(sess.copy(photosCaptured = kept, retakes = retakes), SessionOutcome.ABANDONED)
             }
             cleanupAbortedSession(sess, before.event, before.photos + before.reviewFile + capturingFile, inFlightCapture)
-            shareId?.let(share::unregister)
+            uploads.deleteSession(sess.id)
         }
         capturingFile = null
         session = null
         sessionFinished = false
-        shareId = null
         _state.update {
             BoothUiState(
                 event = it.event,
@@ -483,6 +490,7 @@ class BoothSessionViewModel @Inject constructor(
         const val THANKS_SECONDS = 15
         const val MAX_COPIES = 5
         const val SMILE_MS = 450L
+        const val FOCUS_AT_SECOND = 2
         const val LATE_CAPTURE_SWEEP_MS = 4_000L
         const val RETAKE_COUNTDOWN_DELAY_MS = 500L
         const val MESSAGE_MS = 4_000L

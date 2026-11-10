@@ -16,9 +16,6 @@ import com.photobooth.domain.model.LayoutType
 import com.photobooth.domain.model.Orientation
 import com.photobooth.render.PhotoCompositorEngine
 import com.photobooth.render.PhotoDecoder
-import com.photobooth.domain.model.PhotoFilterType
-import com.photobooth.share.GalleryTheme
-import com.photobooth.share.LocalGalleryHttpServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -28,8 +25,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 
 /** Runs inside the app process on the tablet; every measurement is logged under the "Photobooth" tag with an "E2E" prefix. */
 @RunWith(AndroidJUnit4::class)
@@ -67,8 +62,8 @@ class PrintPipelineInstrumentedTest {
             val photos = List(config.photoCount) { i -> if (i % 2 == 0) normalPhoto else rotatedPhoto }
 
             val target = File(prints, "E2E_${type.name}_${orientation.name}.jpg")
-            val cold = engine.renderPrint(config, photos, PhotoFilterType.ORIGINAL, target)
-            val warm = (1..3).map { engine.renderPrint(config, photos, PhotoFilterType.ORIGINAL, target) }.minBy { it.totalMs }
+            val cold = engine.renderPrint(config, photos, target)
+            val warm = (1..3).map { engine.renderPrint(config, photos, target) }.minBy { it.totalMs }
 
             val expectedW = if (orientation == Orientation.LANDSCAPE) 1800 else 1200
             val expectedH = if (orientation == Orientation.LANDSCAPE) 1200 else 1800
@@ -86,21 +81,6 @@ class PrintPipelineInstrumentedTest {
         }.max()
         Log.i(TAG, "E2E SUMMARY slowestWarm=${slowest}ms target<400ms=${slowest < 400}")
         assertTrue("slowest warm render ${slowest}ms exceeds 400ms", slowest < 400)
-    }
-
-    @Test
-    fun filtersRenderOnGridLayout() {
-        val preset = DefaultLayoutPresets.forType(LayoutType.GRID_2X2)
-        val config = EventLayoutConfigEntity(
-            eventId = "e2e", layoutType = preset.type, isEnabled = true, orientation = preset.orientation,
-            canvasWidthPx = preset.canvasWidthPx, canvasHeightPx = preset.canvasHeightPx,
-            photoSlots = preset.slots,
-        )
-        PhotoFilterType.entries.forEach { filter ->
-            val target = File(eventDir, "${EventStorage.COMPOSITED_PRINTS}/E2E_FILTER_${filter.name}.jpg")
-            val r = engine.renderPrint(config, List(4) { normalPhoto }, filter, target)
-            Log.i(TAG, "E2E FILTER ${filter.name} total=${r.totalMs}ms size=${r.widthPx}x${r.heightPx}")
-        }
     }
 
     @Test
@@ -136,58 +116,6 @@ class PrintPipelineInstrumentedTest {
                 Color.red(corner) > 200 && Color.green(corner) < 80 && Color.blue(corner) < 80)
         }
         Log.i(TAG, "E2E EXIF rotation mapping OK")
-    }
-
-    @Test
-    fun galleryServerServesSessionPageDownloadsAndZip() {
-        // The app process already runs its own server on :8080 from Application.onCreate.
-        assertEquals(200, get("http://127.0.0.1:8080/health").first)
-        val server = LocalGalleryHttpServer(18080)
-        assertTrue("server failed to bind :18080", server.start())
-        try {
-            assertEquals(200, get("http://127.0.0.1:18080/health").first)
-            val dir = File(eventDir, "${EventStorage.SESSIONS}/e2e-session").also { File(it, EventStorage.ORIGINALS).mkdirs() }
-            val montage = File(dir, EventStorage.MONTAGE_FILE).also { normalPhoto.copyTo(it, overwrite = true) }
-            val raws = (1..3).map { n -> File(dir, "${EventStorage.ORIGINALS}/Photo_$n.jpg").also { normalPhoto.copyTo(it, overwrite = true) } }
-            val theme = GalleryTheme("E2E <Gala>", "#112233", "#445566", "#FAFAFA", "#101010")
-            val handle = server.register("e2e-session", montage, raws, theme)
-            assertTrue("no LAN address", handle != null)
-
-            val page = String(get("http://127.0.0.1:18080/session/e2e-session").second)
-            assertTrue(page.contains("Télécharger le Montage") && page.contains("Tout télécharger (.ZIP)"))
-            assertTrue(page.contains("Télécharger Photo #3") && page.contains("--p:#112233") && page.contains("--bg:#FAFAFA"))
-            assertTrue("event name must be escaped", page.contains("E2E &lt;Gala&gt;") && !page.contains("E2E <Gala>"))
-            assertEquals(montage.length().toInt(), get("http://127.0.0.1:18080/download/e2e-session/montage").second.size)
-            assertEquals(raws[1].length().toInt(), get("http://127.0.0.1:18080/download/e2e-session/raw/2").second.size)
-            assertEquals(200, get("http://127.0.0.1:18080/session/e2e-session/thumb/1.jpg").first)
-
-            val zip = get("http://127.0.0.1:18080/download/e2e-session/all.zip")
-            assertEquals(200, zip.first)
-            val names = java.util.zip.ZipInputStream(zip.second.inputStream()).use { zin ->
-                generateSequence { zin.nextEntry }.map { it.name }.toList()
-            }
-            assertEquals(listOf("Montage_Final.jpg", "Photo_1.jpg", "Photo_2.jpg", "Photo_3.jpg"), names)
-
-            assertEquals(404, get("http://127.0.0.1:18080/download/e2e-session/raw/4").first)
-            assertEquals(404, get("http://127.0.0.1:18080/download/e2e-session/raw/0").first)
-            assertEquals(404, get("http://127.0.0.1:18080/download/e2e-session/raw/abc").first)
-            assertEquals(404, get("http://127.0.0.1:18080/session/unknown").first)
-            Log.i(TAG, "E2E GALLERY page=ok montage=ok raw=ok zipEntries=$names zipBytes=${zip.second.size} url=${handle?.url}")
-        } finally {
-            server.stop()
-        }
-    }
-
-    private fun get(url: String): Pair<Int, ByteArray> {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        return try {
-            conn.connectTimeout = 3000
-            conn.readTimeout = 5000
-            val code = conn.responseCode
-            code to (if (code in 200..299) conn.inputStream.use { it.readBytes() } else ByteArray(0))
-        } finally {
-            conn.disconnect()
-        }
     }
 
     private fun jfifDpi(file: File): Int {

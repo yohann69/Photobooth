@@ -14,6 +14,7 @@ internal object Ptp {
     const val OC_OPEN_SESSION = 0x1002
     const val OC_CLOSE_SESSION = 0x1003
     const val OC_GET_OBJECT_HANDLES = 0x1007
+    const val OC_GET_OBJECT_INFO = 0x1008
     const val OC_GET_OBJECT = 0x1009
     const val OC_INITIATE_CAPTURE = 0x100E
 
@@ -31,10 +32,14 @@ internal object CanonEos {
     const val OC_SET_EVENT_MODE = 0x9115
     const val OC_GET_EVENT = 0x9116
     const val OC_TRANSFER_COMPLETE = 0x9117
+    const val OC_PC_HDD_CAPACITY = 0x911A
+    const val OC_KEEP_DEVICE_ON = 0x911D
+    const val OC_REMOTE_RELEASE = 0x910F
     const val OC_REMOTE_RELEASE_ON = 0x9128
     const val OC_REMOTE_RELEASE_OFF = 0x9129
     const val OC_INITIATE_VIEWFINDER = 0x9151
     const val OC_GET_VIEWFINDER_DATA = 0x9153
+    const val OC_DO_AF = 0x9154
 
     const val RC_NOT_READY = 0xA102
 
@@ -48,6 +53,7 @@ internal object CanonEos {
 
     const val EC_OBJECT_ADDED_EX = 0xC181
     const val EC_REQUEST_OBJECT_TRANSFER = 0xC186
+    const val EC_OBJECT_ADDED_EX64 = 0xC1A9
 
     const val VIEWFINDER_BUFFER_SIZE = 0x00100000
 }
@@ -148,7 +154,18 @@ internal fun parseEosEvents(data: ByteArray, length: Int): List<EosObject> {
         val size = data.u32(i)
         val type = data.u32(i + 4)
         if (size < 8 || i + size > length || type == 0) break
-        if ((type == CanonEos.EC_OBJECT_ADDED_EX || type == CanonEos.EC_REQUEST_OBJECT_TRANSFER) && size >= 0x20) {
+        if (type == CanonEos.EC_OBJECT_ADDED_EX64 && size >= 0x1C) {
+            // oid@8, ofc@12, 64-bit size@20, name (often empty) at 0x28
+            val nameStart = i + 0x28
+            var nameEnd = nameStart
+            while (nameEnd < i + size && data[nameEnd] != 0.toByte()) nameEnd++
+            out += EosObject(
+                oid = data.u32(i + 8),
+                ofc = data.u16(i + 12),
+                size = data.u32(i + 20).toLong() and 0xFFFFFFFFL,
+                name = if (nameEnd > nameStart) String(data, nameStart, nameEnd - nameStart, Charsets.US_ASCII) else "",
+            )
+        } else if ((type == CanonEos.EC_OBJECT_ADDED_EX || type == CanonEos.EC_REQUEST_OBJECT_TRANSFER) && size >= 0x20) {
             val nameStart = i + 0x28
             var nameEnd = nameStart
             while (nameEnd < i + size && data[nameEnd] != 0.toByte()) nameEnd++
@@ -162,4 +179,37 @@ internal fun parseEosEvents(data: ByteArray, length: Int): List<EosObject> {
         i += size
     }
     return out
+}
+
+/** One line per GetEvent record (type, size and the first bytes), for diagnosing events the parser does not know. */
+internal fun describeEosRecords(data: ByteArray, length: Int): String {
+    val out = StringBuilder()
+    var i = 0
+    while (i + 8 <= length) {
+        val size = data.u32(i)
+        val type = data.u32(i + 4)
+        if (size < 8 || i + size > length || type == 0) break
+        val hex = (i until minOf(i + size, i + 64)).joinToString("") { "%02x".format(data[it]) }
+        out.append("\n   type=0x%04x size=%d %s".format(type, size, hex))
+        i += size
+    }
+    return out.toString()
+}
+
+/** Compact "prop=value" list of the property-change records (0xC189) in a GetEvent reply. */
+internal fun summarizeEosProps(data: ByteArray, length: Int): String {
+    val out = ArrayList<String>()
+    var i = 0
+    while (i + 8 <= length) {
+        val size = data.u32(i)
+        val type = data.u32(i + 4)
+        if (size < 8 || i + size > length || type == 0) break
+        when {
+            type == 0xC189 && size >= 16 -> out += "%04x=%x".format(data.u32(i + 8), data.u32(i + 12))
+            type == 0xC18A && size >= 12 -> out += "avail:%04x".format(data.u32(i + 8))
+            else -> out += "ev%04x(%d)".format(type, size)
+        }
+        i += size
+    }
+    return out.joinToString(" ")
 }

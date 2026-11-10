@@ -36,7 +36,6 @@ class CameraViewModel @Inject constructor(
     init {
         viewModelScope.launch { manager.connectionState.collect { s -> _state.update { it.copy(connection = s) } } }
         viewModelScope.launch { manager.liveViewRotationDegrees.collect { r -> _state.update { it.copy(rotationDegrees = r) } } }
-        viewModelScope.launch { events.observeActive().collect { e -> if (e != null) _state.update { it.copy(mirror = e.mirrorLivePreview) } } }
         viewModelScope.launch {
             var count = 0
             val counter = launch { frames.collect { count++ } }

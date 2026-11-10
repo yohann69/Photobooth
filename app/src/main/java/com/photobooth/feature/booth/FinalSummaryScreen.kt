@@ -20,8 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,18 +35,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.photobooth.domain.model.PhotoFilterType
 
-/** Left: the finished montage. Right: filters, copy counter, print, and the session QR code, all in view at once. */
+/** Left: the finished montage. Right: copy counter and the confirm button; cancel stays where it is on the capture screen. */
 @Composable
 fun FinalSummaryScreen(
     state: BoothUiState,
-    onFilter: (PhotoFilterType) -> Unit,
     onCopies: (Int) -> Unit,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
@@ -53,64 +54,62 @@ fun FinalSummaryScreen(
     var confirmAbort by remember { mutableStateOf(false) }
     DisposableEffect(Unit) { onDispose { UiAudit.clear("final") } }
 
-    Row(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-        Box(Modifier.weight(0.55f).fillMaxHeight().auditZone("final", "stage"), contentAlignment = Alignment.Center) {
-            val preview = state.finalPreview
-            if (preview != null) {
-                Image(preview.asImageBitmap(), "Composition finale", Modifier.fillMaxSize().auditZone("final", "preview"), contentScale = ContentScale.Fit)
+    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+        Row(Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            Box(Modifier.weight(1f).fillMaxHeight().auditZone("final", "stage"), contentAlignment = Alignment.Center) {
+                val preview = state.finalPreview
+                if (preview != null) {
+                    Image(preview.asImageBitmap(), "Composition finale", Modifier.fillMaxSize().auditZone("final", "preview"), contentScale = ContentScale.Fit)
+                }
+                if (state.isRendering) CircularProgressIndicator(Modifier.size(72.dp), color = BoothColors.Accent)
             }
-            if (state.isRendering) CircularProgressIndicator(Modifier.size(72.dp), color = BoothColors.Accent)
+            Column(
+                Modifier.width(SidePanelWidth).fillMaxHeight().padding(bottom = 100.dp).auditZone("final", "controls"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterVertically),
+            ) {
+                Text("Votre photo est prête !", color = BoothColors.OnDark, fontSize = 34.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                state.message?.let { Text(it, color = BoothColors.Retake, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                        RoundStepper("−", state.copies > 0) { onCopies(state.copies - 1) }
+                        Text("${state.copies}", color = BoothColors.OnDark, fontSize = 64.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(90.dp), textAlign = TextAlign.Center)
+                        RoundStepper("+", state.copies < state.maxCopies) { onCopies(state.copies + 1) }
+                    }
+                    Text(
+                        if (state.copies == 0) "Pas d'impression : photos à télécharger" else "Copies à imprimer",
+                        color = BoothColors.Muted, fontSize = 20.sp, textAlign = TextAlign.Center,
+                    )
+                }
+
+                val printing = state.copies > 0
+                WideActionButton(
+                    label = if (printing) "IMPRIMER" else "TERMINER",
+                    icon = if (printing) PrintIcon else Icons.Rounded.Check,
+                    enabled = !state.isRendering,
+                    onClick = onConfirm,
+                )
+            }
         }
-        Column(
-            Modifier.weight(0.45f).fillMaxHeight().auditZone("final", "controls"),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterVertically),
-        ) {
-            Text("Votre photo est prête !", color = BoothColors.OnDark, fontSize = 34.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            state.message?.let { Text(it, color = BoothColors.Retake, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-
-            if (state.showFilterBar) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.filters.forEach { f -> FilterPill(f, f == state.filter, Modifier.weight(1f)) { onFilter(f) } }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                RoundStepper("−", state.copies > 1) { onCopies(state.copies - 1) }
-                Text("${state.copies}", color = BoothColors.OnDark, fontSize = 64.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(90.dp), textAlign = TextAlign.Center)
-                RoundStepper("+", state.copies < state.maxCopies) { onCopies(state.copies + 1) }
-            }
-
-            if (confirmAbort) {
-                Text("Supprimer toutes les photos de cette session ?", color = BoothColors.OnDark, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    BoothButton("SUPPRIMER", onCancel, Modifier.weight(1f), container = BoothColors.Retake, fontSize = 20, minHeight = 64.dp, horizontalPadding = 8.dp)
-                    BoothButton("CONTINUER", { confirmAbort = false }, Modifier.weight(1f), container = BoothColors.Panel, fontSize = 20, minHeight = 64.dp, horizontalPadding = 8.dp)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                    CircleIconButton(Icons.Rounded.Close, "Annuler la session", { confirmAbort = true }, container = BoothColors.Panel, size = 80.dp, iconSize = 44.dp)
-                    CircleIconButton(PrintIcon, "Imprimer", onConfirm, container = BoothColors.Keep, enabled = !state.isRendering, size = 120.dp, iconSize = 72.dp)
-                }
-            }
-
-        }
+        if (!confirmAbort) CancelSessionButton { confirmAbort = true }
+        if (confirmAbort) AbortConfirmOverlay(onConfirm = onCancel, onDismiss = { confirmAbort = false })
     }
 }
 
+/** Wide green confirm button: icon and label side by side. */
 @Composable
-private fun FilterPill(filter: PhotoFilterType, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    Box(
-        modifier.height(72.dp).clip(RoundedCornerShape(24.dp))
-            .background(if (selected) BoothColors.Accent else BoothColors.Panel)
-            .border(3.dp, if (selected) BoothColors.OnAccent else BoothColors.OnDark.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick).padding(horizontal = 4.dp),
-        contentAlignment = Alignment.Center,
+private fun WideActionButton(label: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    val container = BoothColors.Keep
+    Row(
+        Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(48.dp))
+            .background(if (enabled) container else container.copy(alpha = 0.35f))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            filter.label, color = if (selected) BoothColors.OnAccent else BoothColors.OnDark,
-            fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2,
-        )
+        Icon(icon, null, Modifier.size(52.dp), tint = contrastOn(container))
+        Text(label, color = contrastOn(container), fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
     }
 }
 
@@ -157,7 +156,10 @@ fun ThanksScreen(state: BoothUiState, onDone: () -> Unit) {
                 }
             } else {
                 val plural = if (state.copies > 1) "s" else ""
-                if (state.printWaiting) {
+                if (state.copies == 0) {
+                    Text("Vos photos sont prêtes", color = BoothColors.OnDark, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    if (state.share != null || state.shareLoading) Text("Scannez le QR code pour les télécharger.", color = BoothColors.Muted, fontSize = 28.sp)
+                } else if (state.printWaiting) {
                     Text("Impression en attente", color = BoothColors.OnDark, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                     Text("L'imprimante est momentanément indisponible, votre photo sera imprimée dès que possible.", color = BoothColors.Muted, fontSize = 28.sp)
                 } else {
@@ -168,10 +170,21 @@ fun ThanksScreen(state: BoothUiState, onDone: () -> Unit) {
             Text("Retour à l'accueil dans ${state.thanksSecondsLeft} s", color = BoothColors.AccentAlt, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
             BoothButton("TERMINER", onDone, container = BoothColors.Panel, fontSize = 26, minHeight = 80.dp)
         }
-        state.share?.let { share ->
+        if (state.share != null || state.shareLoading || state.shareFailed) {
             Column(Modifier.weight(0.9f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Scannez pour récupérer vos fichiers", color = BoothColors.OnDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                QrBlock(share, Modifier.weight(1f).fillMaxWidth(), "Même Wi-Fi que la borne")
+                Text("Scannez pour récupérer vos photos", color = BoothColors.OnDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                when {
+                    state.share != null -> QrBlock(state.share, Modifier.weight(1f).fillMaxWidth(), "Disponible même loin de la borne")
+                    state.shareLoading -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            CircularProgressIndicator(Modifier.size(64.dp), color = BoothColors.Accent)
+                            Text("Préparation du lien…", color = BoothColors.Muted, fontSize = 24.sp)
+                        }
+                    }
+                    else -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("Lien de téléchargement indisponible pour le moment.", color = BoothColors.Muted, fontSize = 24.sp, textAlign = TextAlign.Center)
+                    }
+                }
             }
         }
     }

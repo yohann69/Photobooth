@@ -25,7 +25,7 @@ data class EventLayoutConfigEntity(
     val layoutType: LayoutType,
     val isEnabled: Boolean,
     val orientation: Orientation,
-    /** Transparent PNG at canvas resolution, stored in the owning event's Frames folder and drawn above the photos. */
+    /** Transparent PNG at canvas resolution, stored in the owning event's Frames folder and drawn behind the photos. */
     val customFramePngPath: String? = null,
     val backgroundImagePath: String? = null,
     val backgroundColorHex: String = "#FFFFFF",

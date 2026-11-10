@@ -22,8 +22,14 @@ interface PrintJobDao {
     @Query("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING') ORDER BY createdAt ASC LIMIT 1")
     suspend fun nextRunnable(): PrintJobEntity?
 
-    @Query("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING')")
+    @Query("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING') ORDER BY createdAt ASC")
     fun observePending(): Flow<List<PrintJobEntity>>
+
+    @Query("UPDATE print_jobs SET status = 'CANCELLED', updatedAt = :now WHERE id = :id AND status IN ('QUEUED', 'PRINTING')")
+    suspend fun cancel(id: Long, now: Long): Int
+
+    @Query("UPDATE print_jobs SET status = 'CANCELLED', updatedAt = :now WHERE status IN ('QUEUED', 'PRINTING')")
+    suspend fun cancelAll(now: Long): Int
 
     @Query("SELECT * FROM print_jobs WHERE eventId = :eventId ORDER BY createdAt DESC")
     fun observeForEvent(eventId: String): Flow<List<PrintJobEntity>>

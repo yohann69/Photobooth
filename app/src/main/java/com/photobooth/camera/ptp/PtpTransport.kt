@@ -3,6 +3,8 @@ package com.photobooth.camera.ptp
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbRequest
+import android.util.Log
+import com.photobooth.core.PhotoboothLog.TAG
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -20,6 +22,10 @@ internal class PtpTransport(
 ) : AutoCloseable {
 
     private var nextTransactionId = 0
+    private var lastDataBytes = 0L
+
+    /** Logs every transaction (operation, parameters, response, data size); off by default because live view is chatty. */
+    @Volatile var trace = false
     private val inRequest = UsbRequest()
     private val inBuffer: ByteBuffer = ByteBuffer.allocateDirect(CHUNK_BYTES).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -38,6 +44,9 @@ internal class PtpTransport(
         sink: PtpDataSink? = null,
     ): PtpResponse {
         val txId = nextTransactionId++
+        val startedAt = if (trace) System.nanoTime() else 0L
+        lastDataBytes = 0
+        if (trace) Log.i(TAG, "PTP> tx=$txId op=0x${opCode.toString(16)} params=${params.joinToString(",") { "0x" + it.toUInt().toString(16) }} out=${outPayload?.size ?: 0}B")
         sendCommand(opCode, txId, params)
         if (outPayload != null) sendData(opCode, txId, outPayload)
 
@@ -54,7 +63,11 @@ internal class PtpTransport(
                 }
                 Ptp.CONTAINER_RESPONSE -> {
                     val count = ((received - Ptp.HEADER_SIZE) / 4).coerceAtMost(5)
-                    return PtpResponse(code, IntArray(count) { inBuffer.getInt(Ptp.HEADER_SIZE + it * 4) })
+                    val response = PtpResponse(code, IntArray(count) { inBuffer.getInt(Ptp.HEADER_SIZE + it * 4) })
+                    if (trace) {
+                        Log.i(TAG, "PTP< tx=$txId op=0x${opCode.toString(16)} response=0x${code.toString(16)} params=${response.params.joinToString(",") { "0x" + it.toUInt().toString(16) }} data=${lastDataBytes}B in ${(System.nanoTime() - startedAt) / 1_000_000}ms")
+                    }
+                    return response
                 }
                 else -> received = readChunk()
             }
@@ -75,6 +88,7 @@ internal class PtpTransport(
     private fun receiveData(containerLength: Long, sink: PtpDataSink?) {
         if (containerLength < Ptp.HEADER_SIZE) throw IOException("Bad PTP data container length $containerLength")
         var remaining = containerLength - Ptp.HEADER_SIZE
+        lastDataBytes = remaining
 
         // First chunk: header already consumed, payload follows at offset 12.
         val firstAvailable = inBuffer.limit() - Ptp.HEADER_SIZE

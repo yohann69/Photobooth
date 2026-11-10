@@ -84,9 +84,9 @@ fun LayoutsTab(
         item(span = { GridItemSpan(maxLineSpan) }) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text("Compositions", style = MaterialTheme.typography.headlineSmall)
+                    Text("Layouts & frames: ${state.activeEvent?.name ?: "no event"}", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "Every layout fills one 10×15 cm sheet. Frames and designs belong to this event only: " +
+                        "Switch layouts on or off for this event and give each its own frame. Every layout fills one 10×15 cm sheet; frames belong to this event only: " +
                             (state.events.firstOrNull { it.event.id == state.activeEvent?.id }?.folderPath?.let { "$it/Frames" } ?: "the event's Frames folder") + ".",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -224,10 +224,10 @@ fun FrameConfiguratorDialog(
                     }
                     SwitchRow("Enabled for guests", checked = cfg.isEnabled) { onIntent(AdminIntent.ToggleLayout(cfg.layoutType, it)) }
 
-                    SectionCard("Custom frame overlay") {
+                    SectionCard("Custom frame") {
                         val path = cfg.customFramePngPath
                         Text(
-                            "Stored in this event's Frames folder; never shared with other events. Keep logos inside the dashed logo zone of the test frame.",
+                            "PNG drawn behind the photos, so photos always cover it. Stored in this event's Frames folder; never shared with other events. Keep logos inside the dashed logo zone of the test frame.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(

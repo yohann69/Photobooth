@@ -3,11 +3,9 @@ package com.photobooth.feature.admin
 import android.net.Uri
 import com.photobooth.data.db.entity.EventEntity
 import com.photobooth.data.db.entity.EventLayoutConfigEntity
-import com.photobooth.data.db.entity.PrintFinish
 import com.photobooth.print.PrintStatus
+import com.photobooth.print.dnp.DnpLinkState
 import com.photobooth.data.settings.AppSettings
-import com.photobooth.data.settings.PrinterConnection
-import com.photobooth.data.settings.PrinterModel
 import com.photobooth.diagnostics.DiagnosticsSnapshot
 import com.photobooth.domain.model.LayoutType
 import com.photobooth.domain.model.PhotoAspect
@@ -15,8 +13,8 @@ import com.photobooth.domain.model.PhotoAspect
 enum class AdminTab(val title: String) {
     DASHBOARD("Dashboard"),
     EVENTS("Events"),
-    LAYOUTS("Layouts & Frames"),
-    SETTINGS("Settings"),
+    EVENT_SETTINGS("Event settings"),
+    LAYOUTS("Layouts & frames"),
 }
 
 data class EventRow(
@@ -49,6 +47,7 @@ data class AdminUiState(
     val diagnostics: DiagnosticsSnapshot? = null,
     val selfTest: SelfTestState = SelfTestState.Idle,
     val printStatus: PrintStatus = PrintStatus(),
+    val dnp: DnpLinkState = DnpLinkState(),
     val message: String? = null,
 )
 
@@ -57,7 +56,7 @@ sealed interface AdminIntent {
     data object RefreshEvents : AdminIntent
     data object DismissMessage : AdminIntent
 
-    data class CreateEvent(val name: String) : AdminIntent
+    data class CreateEvent(val name: String, val dateUtc: Long) : AdminIntent
     data class SwitchEvent(val eventId: String) : AdminIntent
     data class UpdateActiveEvent(val transform: (EventEntity) -> EventEntity) : AdminIntent
     data class SetPhotoAspect(val aspect: PhotoAspect) : AdminIntent
@@ -74,20 +73,14 @@ sealed interface AdminIntent {
     data class SetKioskMode(val enabled: Boolean) : AdminIntent
     data class SetKeepScreenOn(val enabled: Boolean) : AdminIntent
     data class SetHideSystemBars(val enabled: Boolean) : AdminIntent
-    data class SetAttractSlideshow(val enabled: Boolean) : AdminIntent
 
-    data class SavePrinter(
-        val connection: PrinterConnection,
-        val model: PrinterModel,
-        val ip: String,
-        val port: Int,
-        val rollCapacity: Int,
-        val ippPort: Int,
-        val ippPath: String,
-        val finish: PrintFinish,
-        val dryRun: Boolean,
-    ) : AdminIntent
+    data class SetDryRun(val enabled: Boolean) : AdminIntent
     data object ReplaceRoll : AdminIntent
+    data class SetDnpOrientation(val flipVertical: Boolean, val mirror: Boolean, val portraitClockwise: Boolean) : AdminIntent
+    data class PrintTestSheet(val portrait: Boolean) : AdminIntent
+    data class SaveUpload(val baseUrl: String, val token: String) : AdminIntent
+    data class CancelPrintJob(val jobId: Long) : AdminIntent
+    data object CancelAllPrintJobs : AdminIntent
     data class ChangePin(val currentPin: String, val newPin: String) : AdminIntent
 
     data object RunSelfTest : AdminIntent

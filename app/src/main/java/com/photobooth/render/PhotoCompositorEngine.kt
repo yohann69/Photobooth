@@ -14,7 +14,6 @@ import com.photobooth.camera.partialFileFor
 import com.photobooth.core.PhotoboothLog.TAG
 import com.photobooth.data.db.entity.EventLayoutConfigEntity
 import com.photobooth.domain.layout.DefaultLayoutPresets
-import com.photobooth.domain.model.PhotoFilterType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -46,8 +45,8 @@ class PrintRender(
 )
 
 /**
- * Renders a layout exactly as it prints: background, photos centre-cropped into the (calibrated) slots with
- * an optional colour filter, then the transparent PNG frame.
+ * Renders a layout exactly as it prints: background, the PNG frame, then the photos centre-cropped into the
+ * (calibrated) slots.
  *
  * Slot photos are decoded one at a time, each with a timeout: this tablet's hardware JPEG decoder service hung
  * for good once under four concurrent decodes, which would freeze the booth on the "preparing" screen.
@@ -69,8 +68,7 @@ class PhotoCompositorEngine @Inject constructor(
         scale: Float,
         photos: PhotoSupplier,
         showGuides: Boolean = false,
-        filter: PhotoFilterType = PhotoFilterType.ORIGINAL,
-    ): Bitmap = renderTimed(config, scale, photos, showGuides, filter, null)
+    ): Bitmap = renderTimed(config, scale, photos, showGuides, null)
 
     /**
      * The real final composition (background, frame, event artwork) with the [validated] photos in their slots,
@@ -83,12 +81,11 @@ class PhotoCompositorEngine @Inject constructor(
         validated: List<File?>,
         newPhoto: File?,
         newIndex: Int,
-        filter: PhotoFilterType = PhotoFilterType.ORIGINAL,
     ): Bitmap {
         val files = validated.toMutableList()
         if (newPhoto != null && newIndex in files.indices) files[newIndex] = newPhoto
         val supplier = PhotoSupplier { i, w, h -> files.getOrNull(i)?.let { PhotoDecoder.decodeCrop(it, w, h) } }
-        return renderTimed(config, scale, supplier, false, filter, null, placeholders = true)
+        return renderTimed(config, scale, supplier, false, null, placeholders = true)
     }
 
     /** Full-resolution print render written as a 98% JPEG tagged 300 DPI; blocks, so call it off the main thread. */
@@ -96,13 +93,12 @@ class PhotoCompositorEngine @Inject constructor(
     fun renderPrint(
         config: EventLayoutConfigEntity,
         photoFiles: List<File?>,
-        filter: PhotoFilterType,
         target: File,
     ): PrintRender {
         val started = System.nanoTime()
         val timing = LongArray(2)
         val supplier = PhotoSupplier { i, w, h -> photoFiles.getOrNull(i)?.let { PhotoDecoder.decodeCrop(it, w, h) } }
-        val bitmap = renderTimed(config, 1f, supplier, false, filter, timing)
+        val bitmap = renderTimed(config, 1f, supplier, false, timing)
 
         val encodeStart = System.nanoTime()
         val bytes = ByteArrayOutputStream(512 * 1024).also {
@@ -144,7 +140,6 @@ class PhotoCompositorEngine @Inject constructor(
         scale: Float,
         photos: PhotoSupplier,
         showGuides: Boolean,
-        filter: PhotoFilterType,
         timing: LongArray?,
         placeholders: Boolean = false,
     ): Bitmap {
@@ -181,6 +176,10 @@ class PhotoCompositorEngine @Inject constructor(
             config.backgroundImagePath?.let { path ->
                 loadScaled(path, outW)?.let { drawCenterCrop(canvas, it, RectF(0f, 0f, outW.toFloat(), outH.toFloat()), paint) }
             }
+            // The frame sits under the photos: they always cover it.
+            config.customFramePngPath?.let { path ->
+                loadScaled(path, outW)?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, outW.toFloat(), outH.toFloat()), paint) }
+            }
 
             slots.forEachIndexed { index, s ->
                 val rect = RectF(s.x * outW, s.y * outH, (s.x + s.width) * outW, (s.y + s.height) * outH)
@@ -190,16 +189,13 @@ class PhotoCompositorEngine @Inject constructor(
                 val source = s.sourceIndex ?: index
                 val photo = decoded[source]
                 when {
-                    photo != null -> filter.draw(canvas, photo, rect, paint)
+                    photo != null -> drawCenterCrop(canvas, photo, rect, paint)
                     placeholders -> drawPlaceholder(canvas, rect, source + 1)
                     else -> canvas.drawColor(Color.DKGRAY)
                 }
                 canvas.restore()
             }
 
-            config.customFramePngPath?.let { path ->
-                loadScaled(path, outW)?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, outW.toFloat(), outH.toFloat()), paint) }
-            }
             if (showGuides) drawGuides(canvas, config, outW, outH)
         } finally {
             decoded.values.forEach { it?.recycle() }

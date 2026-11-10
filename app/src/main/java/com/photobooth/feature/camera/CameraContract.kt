@@ -11,7 +11,7 @@ sealed interface CaptureUi {
 data class CameraUiState(
     val connection: CameraConnectionState = CameraConnectionState.Disconnected,
     val rotationDegrees: Int = 0,
-    val mirror: Boolean = true,
+    val mirror: Boolean = false,
     val fps: Int = 0,
     val isCapturing: Boolean = false,
     val lastCapture: CaptureUi? = null,
