@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -74,10 +76,8 @@ fun AttractScreen(state: BoothUiState, onStart: () -> Unit) {
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().padding(56.dp)) {
             val titleSp = (minOf(maxHeight.value * 0.13f, maxWidth.value * 0.085f)).coerceIn(40f, 120f)
             Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    "PHOTOBOOTH", Modifier.enter(0).glass(RoundedCornerShape(50)).padding(horizontal = 22.dp, vertical = 10.dp),
-                    color = BoothColors.Muted, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 5.sp,
-                )
+                // Empty top slot: keeps the event name centred between the edge and the start button.
+                Spacer(Modifier.height(1.dp))
                 Text(
                     state.event?.name ?: "Photobooth", Modifier.enter(120),
                     color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,

@@ -42,6 +42,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -52,45 +53,60 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
- * The booth's one look: near-black surfaces, soft off-white text and a single violet-to-pink accent. Nothing is
- * pure white, so the screen stays easy on the eyes in a dark room.
+ * The booth's one look, the Transat app's dark theme: warm near-black surfaces and Transat's three colours: orange
+ * for the main action of each screen, blue for the secondary ones and beige for text and headlines. Nothing is pure
+ * white, so the screen stays easy on the eyes in a dark room.
  */
 object BoothColors {
-    val Background = Color(0xFF08080D)
-    val Surface = Color(0xFF14141C)
-    val SurfaceHigh = Color(0xFF1E1E29)
-    val Outline = Color(0x1FFFFFFF)
-    val OnDark = Color(0xFFECECF4)
-    val Muted = Color(0xFF8E8EA3)
-    val Accent = Color(0xFF8B6CFF)
-    val AccentAlt = Color(0xFFFF5C9A)
-    val OnAccent = Color(0xFFFDFCFF)
+    val Background = Color(0xFF070402)
+    val Surface = Color(0xFF1E1515)
+    val SurfaceHigh = Color(0xFF2A1F1D)
+    val Outline = Color(0x1FFFE6CC)
+    val OnDark = Color(0xFFFFE6CC)
+    val Muted = Color(0xFFA1A1AA)
+    /** Transat orange. */
+    val Accent = Color(0xFFEC7F32)
+    /** Transat blue: secondary actions and half of the background glows. */
+    val Blue = Color(0xFF0049A8)
+    /** Transat beige, as on the app's dark theme. */
+    val Beige = Color(0xFFFFE6CC)
+    val AccentAlt = Blue
+    val OnAccent = Color(0xFFFFFFFF)
     val Keep = Color(0xFF3DD68C)
     val Retake = Color(0xFFFF6B6B)
     /** Paper of the QR code: light enough to scan, dimmer than white. */
-    val Paper = Color(0xFFE9E9F0)
+    val Paper = Color(0xFFFFF1E2)
 
-    val AccentBrush: Brush get() = Brush.linearGradient(listOf(Accent, AccentAlt))
+    /** Plain Transat orange: buttons are flat, no gradient. */
+    val AccentBrush: Brush get() = SolidColor(Accent)
 }
 
 /** Material colours for the whole app (admin panel included), matching the booth. */
 val BoothColorScheme = darkColorScheme(
     primary = BoothColors.Accent,
     onPrimary = BoothColors.OnAccent,
-    primaryContainer = Color(0xFF2A2350),
-    onPrimaryContainer = BoothColors.OnDark,
-    secondary = BoothColors.AccentAlt,
+    // Selected / active surfaces (current event, selected tab) are Transat blue, so orange stays for actions.
+    primaryContainer = Color(0xFF0D2E5C),
+    onPrimaryContainer = BoothColors.Beige,
+    secondary = BoothColors.Blue,
     onSecondary = BoothColors.OnAccent,
+    secondaryContainer = Color(0xFF0D2E5C),
+    onSecondaryContainer = BoothColors.Beige,
+    tertiary = BoothColors.Beige,
+    onTertiary = BoothColors.Background,
     background = BoothColors.Background,
     onBackground = BoothColors.OnDark,
     surface = BoothColors.Background,
     onSurface = BoothColors.OnDark,
     surfaceVariant = BoothColors.SurfaceHigh,
     onSurfaceVariant = BoothColors.Muted,
+    surfaceContainerLowest = BoothColors.Background,
+    surfaceContainerLow = Color(0xFF140D0C),
     surfaceContainer = BoothColors.Surface,
     surfaceContainerHigh = BoothColors.SurfaceHigh,
-    surfaceContainerHighest = Color(0xFF272733),
-    outline = Color(0xFF3A3A4A),
+    surfaceContainerHighest = Color(0xFF332623),
+    outline = Color(0xFF403D3D),
+    outlineVariant = Color(0xFF2E2826),
     error = BoothColors.Retake,
 )
 
@@ -157,7 +173,7 @@ fun Modifier.glass(shape: Shape = RoundedCornerShape(32.dp), color: Color = Boot
 
 enum class BoothButtonStyle { PRIMARY, GLASS, DANGER }
 
-/** Pill button readable from arm's length. PRIMARY carries the accent gradient; GLASS is the quiet secondary. */
+/** Pill button readable from arm's length. PRIMARY is Transat orange; GLASS, the secondary, Transat blue. */
 @Composable
 fun BoothButton(
     text: String,
@@ -171,7 +187,7 @@ fun BoothButton(
     horizontalPadding: Dp = 48.dp,
 ) {
     val shape = RoundedCornerShape(50)
-    val content = if (style == BoothButtonStyle.GLASS) BoothColors.OnDark else BoothColors.OnAccent
+    val content = BoothColors.OnAccent
     Row(
         modifier
             .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
@@ -181,7 +197,7 @@ fun BoothButton(
                 when (style) {
                     BoothButtonStyle.PRIMARY -> Modifier.clip(shape).background(BoothColors.AccentBrush)
                     BoothButtonStyle.DANGER -> Modifier.clip(shape).background(BoothColors.Retake.copy(alpha = 0.9f))
-                    BoothButtonStyle.GLASS -> Modifier.glass(shape, BoothColors.SurfaceHigh.copy(alpha = 0.85f))
+                    BoothButtonStyle.GLASS -> Modifier.clip(shape).background(BoothColors.Blue)
                 },
             )
             .padding(horizontal = horizontalPadding, vertical = 16.dp),

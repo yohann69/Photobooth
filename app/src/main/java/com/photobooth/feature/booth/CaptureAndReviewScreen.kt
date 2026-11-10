@@ -148,13 +148,13 @@ fun CaptureAndReviewScreen(
                         }
                         Controls.REVIEW -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(36.dp)) {
                             LabelledAction("Garder") {
-                                CircleIconButton(Icons.Rounded.Check, "Conserver la photo", onKeep, container = BoothColors.Keep, size = 170.dp, iconSize = 96.dp)
+                                CircleIconButton(Icons.Rounded.Check, "Conserver la photo", onKeep, container = BoothColors.Accent, tint = BoothColors.OnAccent, size = 170.dp, iconSize = 96.dp)
                             }
                             if (state.event?.allowRetakes != false) {
                                 LabelledAction("Refaire") {
                                     CircleIconButton(
                                         Icons.Rounded.Refresh, "Refaire la photo", onRetake,
-                                        container = BoothColors.SurfaceHigh, tint = BoothColors.OnDark, outlined = true, size = 120.dp, iconSize = 64.dp,
+                                        container = BoothColors.Blue, tint = BoothColors.OnAccent, size = 120.dp, iconSize = 64.dp,
                                     )
                                 }
                             }

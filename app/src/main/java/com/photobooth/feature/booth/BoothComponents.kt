@@ -57,12 +57,12 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Headline in the accent gradient. */
+/** Headline in Transat beige. */
 @Composable
 fun GradientText(text: String, fontSize: TextUnit, modifier: Modifier = Modifier, fontWeight: FontWeight = FontWeight.Black) {
     Text(
         text, modifier, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1,
-        style = TextStyle(brush = BoothColors.AccentBrush, letterSpacing = (-1).sp),
+        style = TextStyle(color = BoothColors.Beige, letterSpacing = (-1).sp),
     )
 }
 
@@ -81,7 +81,7 @@ fun PulseRings(modifier: Modifier = Modifier, color: Color = BoothColors.Accent,
 }
 
 /** Outlines that grow out of a pill-shaped control and fade, inviting the tap. */
-fun Modifier.pulseOutline(color: Color = BoothColors.AccentAlt, reach: Dp = 34.dp, periodMs: Int = 2_600): Modifier = composed {
+fun Modifier.pulseOutline(color: Color = BoothColors.Blue, reach: Dp = 34.dp, periodMs: Int = 2_600): Modifier = composed {
     val t = rememberInfiniteTransition(label = "outline")
     val phase by t.animateFloat(0f, 1f, infiniteRepeatable(tween(periodMs, easing = LinearEasing), RepeatMode.Restart), label = "phase")
     drawBehind {
@@ -128,8 +128,8 @@ fun StepDots(total: Int, current: Int, modifier: Modifier = Modifier) {
                 Modifier.height(14.dp).width(width.dp).clip(CircleShape).then(
                     when {
                         i == current -> Modifier.background(BoothColors.AccentBrush)
-                        i < current -> Modifier.background(BoothColors.OnDark.copy(alpha = 0.85f))
-                        else -> Modifier.background(BoothColors.OnDark.copy(alpha = 0.18f))
+                        i < current -> Modifier.background(BoothColors.Beige)
+                        else -> Modifier.background(BoothColors.Blue.copy(alpha = 0.55f))
                     },
                 ),
             )
