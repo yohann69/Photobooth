@@ -1,14 +1,13 @@
 package com.photobooth.feature.booth
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,19 +44,22 @@ fun LayoutSelectionScreen(state: BoothUiState, onSelect: (LayoutType) -> Unit, o
     DisposableEffect(Unit) { onDispose { UiAudit.clear("layouts") } }
 
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-        val titleSp = (maxHeight.value * 0.06f).coerceIn(24f, 56f)
+        val titleSp = (maxHeight.value * 0.06f).coerceIn(26f, 56f)
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 16.dp),
+            Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Text("Choisissez votre format", color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            Text("Touchez la composition de votre choix", color = BoothColors.Muted, fontSize = (titleSp * 0.45f).sp, maxLines = 1)
-            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.enter(0), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Choisissez votre format", color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, maxLines = 1)
+                Text("Touchez la composition qui vous plaît", color = BoothColors.Muted, fontSize = (titleSp * 0.42f).sp, maxLines = 1)
+            }
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 repeat(rows) { r ->
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                         repeat(columns) { c ->
-                            val cfg = layouts.getOrNull(r * columns + c)
+                            val index = r * columns + c
+                            val cfg = layouts.getOrNull(index)
                             if (cfg == null) {
                                 Spacer(Modifier.weight(1f))
                             } else {
@@ -66,33 +68,36 @@ fun LayoutSelectionScreen(state: BoothUiState, onSelect: (LayoutType) -> Unit, o
                                     subtitle = "${cfg.photoCount} photo${if (cfg.photoCount > 1) "s" else ""}",
                                     preview = state.layoutPreviews[cfg.layoutType],
                                     onClick = { onSelect(cfg.layoutType) },
-                                    modifier = Modifier.weight(1f).fillMaxHeight().auditZone("layouts", cfg.layoutType.name),
+                                    modifier = Modifier.weight(1f).fillMaxHeight().enter(100 + index * 70).auditZone("layouts", cfg.layoutType.name),
                                 )
                             }
                         }
                     }
                 }
             }
-            BoothButton("ANNULER", onCancel, container = BoothColors.Panel, fontSize = 22, minHeight = 64.dp)
+            BoothButton("Annuler", onCancel, Modifier.enter(250), style = BoothButtonStyle.GLASS, fontSize = 22, minHeight = 64.dp)
         }
     }
 }
 
 @Composable
 private fun LayoutCard(title: String, subtitle: String, preview: android.graphics.Bitmap?, onClick: () -> Unit, modifier: Modifier) {
-    BoxWithConstraints(modifier.clip(RoundedCornerShape(28.dp)).background(BoothColors.Panel).clickable(onClick = onClick)) {
-        val titleSp = (maxHeight.value * 0.085f).coerceIn(15f, 34f)
+    BoxWithConstraints(modifier.pressable(pressedScale = 0.96f, onClick = onClick).glass(RoundedCornerShape(32.dp))) {
+        val titleSp = (maxHeight.value * 0.07f).coerceIn(15f, 30f)
         Column(
-            Modifier.fillMaxSize().padding(12.dp),
+            Modifier.fillMaxSize().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (preview != null) Image(preview.asImageBitmap(), title, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                else CircularProgressIndicator(Modifier.size(40.dp))
+            Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                if (preview != null) Image(
+                    preview.asImageBitmap(), title,
+                    Modifier.aspectRatio(preview.width.toFloat() / preview.height).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Fit,
+                )
+                else CircularProgressIndicator(Modifier.size(40.dp), color = BoothColors.Accent)
             }
-            Text(title, color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = BoothColors.AccentAlt, fontSize = (titleSp * 0.75f).sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(title, color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = BoothColors.Muted, fontSize = (titleSp * 0.72f).sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }
 }

@@ -1,169 +1,217 @@
 package com.photobooth.feature.booth
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.photobooth.data.db.entity.EventEntity
-import com.photobooth.data.db.entity.EventThemeDefaults
-import java.io.File
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-/** Resolved art direction of the active event; every guest screen reads colours from here. */
-@Immutable
-data class BoothPalette(
-    val primary: Color,
-    val secondary: Color,
-    val background: Color,
-    val text: Color,
-    val backgroundImage: File?,
-) {
-    companion object {
-        fun from(event: EventEntity?): BoothPalette = BoothPalette(
-            primary = parseHexColor(event?.primaryColorHex, EventThemeDefaults.PRIMARY),
-            secondary = parseHexColor(event?.secondaryColorHex, EventThemeDefaults.SECONDARY),
-            background = parseHexColor(event?.backgroundColorHex, EventThemeDefaults.BACKGROUND),
-            text = parseHexColor(event?.textColorHex, EventThemeDefaults.TEXT),
-            backgroundImage = event?.customBackgroundImagePath?.let(::File)?.takeIf { it.isFile },
-        )
-    }
-}
-
-val LocalBoothPalette = staticCompositionLocalOf { BoothPalette.from(null) }
-
-/** Accepts #RRGGBB or #AARRGGBB; anything else falls back to [fallbackHex]. */
-fun parseHexColor(hex: String?, fallbackHex: String): Color {
-    fun parse(value: String?): Color? = value?.trim()?.takeIf { Regex("#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})").matches(it) }
-        ?.let { Color(android.graphics.Color.parseColor(it)) }
-    return parse(hex) ?: parse(fallbackHex) ?: Color.Black
-}
-
-/** Black or white, whichever reads better on [background]. */
-fun contrastOn(background: Color): Color = if (background.luminance() > 0.55f) Color(0xFF101018) else Color.White
+import kotlinx.coroutines.delay
 
 /**
- * Applies the active event's art direction (colours and background image) to everything inside, including
- * Material components. Passing null yields the default look.
+ * The booth's one look: near-black surfaces, soft off-white text and a single violet-to-pink accent. Nothing is
+ * pure white, so the screen stays easy on the eyes in a dark room.
  */
+object BoothColors {
+    val Background = Color(0xFF08080D)
+    val Surface = Color(0xFF14141C)
+    val SurfaceHigh = Color(0xFF1E1E29)
+    val Outline = Color(0x1FFFFFFF)
+    val OnDark = Color(0xFFECECF4)
+    val Muted = Color(0xFF8E8EA3)
+    val Accent = Color(0xFF8B6CFF)
+    val AccentAlt = Color(0xFFFF5C9A)
+    val OnAccent = Color(0xFFFDFCFF)
+    val Keep = Color(0xFF3DD68C)
+    val Retake = Color(0xFFFF6B6B)
+    /** Paper of the QR code: light enough to scan, dimmer than white. */
+    val Paper = Color(0xFFE9E9F0)
+
+    val AccentBrush: Brush get() = Brush.linearGradient(listOf(Accent, AccentAlt))
+}
+
+/** Material colours for the whole app (admin panel included), matching the booth. */
+val BoothColorScheme = darkColorScheme(
+    primary = BoothColors.Accent,
+    onPrimary = BoothColors.OnAccent,
+    primaryContainer = Color(0xFF2A2350),
+    onPrimaryContainer = BoothColors.OnDark,
+    secondary = BoothColors.AccentAlt,
+    onSecondary = BoothColors.OnAccent,
+    background = BoothColors.Background,
+    onBackground = BoothColors.OnDark,
+    surface = BoothColors.Background,
+    onSurface = BoothColors.OnDark,
+    surfaceVariant = BoothColors.SurfaceHigh,
+    onSurfaceVariant = BoothColors.Muted,
+    surfaceContainer = BoothColors.Surface,
+    surfaceContainerHigh = BoothColors.SurfaceHigh,
+    surfaceContainerHighest = Color(0xFF272733),
+    outline = Color(0xFF3A3A4A),
+    error = BoothColors.Retake,
+)
+
 @Composable
-fun EventTheme(event: EventEntity?, content: @Composable () -> Unit) {
-    val palette = remember(
-        event?.primaryColorHex, event?.secondaryColorHex, event?.backgroundColorHex,
-        event?.textColorHex, event?.customBackgroundImagePath,
-    ) { BoothPalette.from(event) }
-    val panel = remember(palette) { lerp(palette.background, palette.text, 0.10f) }
-    val base = if (palette.background.luminance() > 0.5f) lightColorScheme() else darkColorScheme()
-    val scheme = remember(palette, base) {
-        base.copy(
-            primary = palette.primary,
-            onPrimary = contrastOn(palette.primary),
-            secondary = palette.secondary,
-            onSecondary = contrastOn(palette.secondary),
-            background = palette.background,
-            onBackground = palette.text,
-            surface = panel,
-            onSurface = palette.text,
+fun BoothTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = BoothColorScheme, content = content)
+
+/** Slow drifting glows behind every guest screen: enough life to feel dynamic, never bright. */
+@Composable
+fun AmbientBackdrop(modifier: Modifier = Modifier) {
+    val t = rememberInfiniteTransition(label = "ambient")
+    val a by t.animateFloat(0f, 1f, infiniteRepeatable(tween(19_000, easing = LinearEasing), RepeatMode.Reverse), label = "a")
+    val b by t.animateFloat(0f, 1f, infiniteRepeatable(tween(27_000, easing = LinearEasing), RepeatMode.Reverse), label = "b")
+    Canvas(modifier.background(BoothColors.Background)) {
+        val r = size.maxDimension * 0.62f
+        drawRect(
+            Brush.radialGradient(
+                listOf(BoothColors.Accent.copy(alpha = 0.26f), Color.Transparent),
+                center = Offset(size.width * (0.05f + 0.5f * a), size.height * (0.1f + 0.25f * b)), radius = r,
+            ),
+        )
+        drawRect(
+            Brush.radialGradient(
+                listOf(BoothColors.AccentAlt.copy(alpha = 0.18f), Color.Transparent),
+                center = Offset(size.width * (0.95f - 0.5f * b), size.height * (0.95f - 0.3f * a)), radius = r,
+            ),
         )
     }
-    CompositionLocalProvider(LocalBoothPalette provides palette) {
-        MaterialTheme(colorScheme = scheme, content = content)
+}
+
+/** Shrinks slightly while pressed and springs back: the tactile answer of every booth control. */
+fun Modifier.pressable(
+    enabled: Boolean = true,
+    role: Role = Role.Button,
+    pressedScale: Float = 0.94f,
+    onClick: () -> Unit,
+): Modifier = composed {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed && enabled) pressedScale else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "press",
+    )
+    graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = source, indication = null, enabled = enabled, role = role, onClick = onClick)
+}
+
+/** Fades and rises into place [delayMs] after entering the composition; used to stagger a screen's content. */
+fun Modifier.enter(delayMs: Int = 0, rise: Dp = 28.dp): Modifier = composed {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(delayMs.toLong())
+        shown = true
+    }
+    val p by animateFloatAsState(if (shown) 1f else 0f, tween(520, easing = FastOutSlowInEasing), label = "enter")
+    graphicsLayer {
+        alpha = p
+        translationY = (1f - p) * rise.toPx()
     }
 }
 
-/** Solid event background colour with the optional event image on top, softened so text stays readable. */
-@Composable
-fun EventBackdrop(modifier: Modifier = Modifier) {
-    val palette = LocalBoothPalette.current
-    Box(modifier.background(palette.background)) {
-        palette.backgroundImage?.let { file ->
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(file).size(1800).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-            Box(Modifier.fillMaxSize().background(palette.background.copy(alpha = 0.25f)))
-        }
-    }
-}
+/** Translucent panel with a hairline border. */
+fun Modifier.glass(shape: Shape = RoundedCornerShape(32.dp), color: Color = BoothColors.Surface.copy(alpha = 0.82f)): Modifier =
+    clip(shape).background(color).border(1.dp, BoothColors.Outline, shape)
 
-object BoothColors {
-    val Background: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.background
-    val Panel: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.let { lerp(it.background, it.text, 0.10f) }
-    val Accent: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.primary
-    val AccentAlt: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.secondary
-    val OnDark: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.text
-    val Muted: Color @Composable @ReadOnlyComposable get() = LocalBoothPalette.current.text.copy(alpha = 0.7f)
-    val OnAccent: Color @Composable @ReadOnlyComposable get() = contrastOn(LocalBoothPalette.current.primary)
-    val Keep = Color(0xFF00C853)
-    val Retake = Color(0xFFFF5252)
-}
+enum class BoothButtonStyle { PRIMARY, GLASS, DANGER }
 
-/** Oversized pill button readable from arm's length; at least 96dp tall. */
+/** Pill button readable from arm's length. PRIMARY carries the accent gradient; GLASS is the quiet secondary. */
 @Composable
 fun BoothButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    container: Color = BoothColors.Accent,
-    content: Color = contrastOn(container),
+    style: BoothButtonStyle = BoothButtonStyle.PRIMARY,
+    icon: ImageVector? = null,
     enabled: Boolean = true,
-    fontSize: Int = 34,
-    minHeight: Dp = 96.dp,
+    fontSize: Int = 30,
+    minHeight: Dp = 92.dp,
     horizontalPadding: Dp = 48.dp,
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.defaultMinSize(minHeight = minHeight),
-        shape = RoundedCornerShape(50),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = container,
-            contentColor = content,
-            disabledContainerColor = container.copy(alpha = 0.35f),
-            disabledContentColor = content.copy(alpha = 0.6f),
-        ),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 16.dp),
+    val shape = RoundedCornerShape(50)
+    val content = if (style == BoothButtonStyle.GLASS) BoothColors.OnDark else BoothColors.OnAccent
+    Row(
+        modifier
+            .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
+            .pressable(enabled, onClick = onClick)
+            .defaultMinSize(minHeight = minHeight)
+            .then(
+                when (style) {
+                    BoothButtonStyle.PRIMARY -> Modifier.clip(shape).background(BoothColors.AccentBrush)
+                    BoothButtonStyle.DANGER -> Modifier.clip(shape).background(BoothColors.Retake.copy(alpha = 0.9f))
+                    BoothButtonStyle.GLASS -> Modifier.glass(shape, BoothColors.SurfaceHigh.copy(alpha = 0.85f))
+                },
+            )
+            .padding(horizontal = horizontalPadding, vertical = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, fontSize = fontSize.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+        if (icon != null) Icon(icon, null, Modifier.size((fontSize * 1.3f).dp), tint = content)
+        Text(text, color = content, fontSize = fontSize.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, maxLines = 1)
     }
 }
 
+/** Round icon action. */
 @Composable
-fun ButtonRow(content: @Composable RowScope.() -> Unit) {
-    Row(
-        Modifier.padding(horizontal = 32.dp),
-        horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+fun CircleIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    container: Color = BoothColors.Accent,
+    tint: Color = BoothColors.Background,
+    outlined: Boolean = false,
+    enabled: Boolean = true,
+    size: Dp = 64.dp,
+    iconSize: Dp = 36.dp,
+) {
+    Box(
+        modifier.size(size).graphicsLayer { alpha = if (enabled) 1f else 0.35f }.pressable(enabled, onClick = onClick)
+            .then(if (outlined) Modifier.glass(CircleShape, container) else Modifier.clip(CircleShape).background(container)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription, Modifier.size(iconSize), tint = tint)
+    }
 }

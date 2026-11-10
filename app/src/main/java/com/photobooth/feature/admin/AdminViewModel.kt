@@ -134,11 +134,6 @@ class AdminViewModel @Inject constructor(
                     post("Photo ratio ${intent.aspect.label}: layouts rebuilt, re-check your frames")
                 }
             }
-            is AdminIntent.SetEventBackgroundImage -> setBackgroundImage(intent.uri)
-            AdminIntent.RemoveEventBackgroundImage -> withActiveEvent { e ->
-                frames.delete(e.customBackgroundImagePath)
-                events.update(e.copy(customBackgroundImagePath = null))
-            }
 
             is AdminIntent.ToggleLayout -> withActiveEvent { layouts.setEnabled(it.id, intent.type, intent.enabled) }
             is AdminIntent.ImportFrame -> importFrame(intent)
@@ -231,16 +226,6 @@ class AdminViewModel @Inject constructor(
                 post("Frame applied to ${intent.type.name}")
             }
             .onFailure { post("Frame import failed: ${it.message}") }
-    }
-
-    private fun setBackgroundImage(uri: android.net.Uri) = withActiveEvent { event ->
-        frames.importBackground(storage.subfolder(event, EventStorage.THEME), uri)
-            .onSuccess { file ->
-                frames.delete(event.customBackgroundImagePath)
-                events.update(event.copy(customBackgroundImagePath = file.absolutePath))
-                post("Background image applied to this event")
-            }
-            .onFailure { post("Background import failed: ${it.message}") }
     }
 
     private fun generateTestFrame(type: com.photobooth.domain.model.LayoutType) = withActiveEvent { event ->

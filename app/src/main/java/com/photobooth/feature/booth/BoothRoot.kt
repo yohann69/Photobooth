@@ -1,13 +1,20 @@
 package com.photobooth.feature.booth
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -32,9 +39,17 @@ fun BoothRoot(viewModel: BoothSessionViewModel, onAdminRequested: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val send = viewModel::onIntent
 
-    EventTheme(state.event) { Box(Modifier.fillMaxSize()) {
-        EventBackdrop(Modifier.fillMaxSize())
-        Crossfade(targetState = state.step.screen(), animationSpec = tween(300), label = "booth-screen") { screen ->
+    BoothTheme { Box(Modifier.fillMaxSize()) {
+        AmbientBackdrop(Modifier.fillMaxSize())
+        AnimatedContent(
+            targetState = state.step.screen(),
+            transitionSpec = {
+                // The new screen settles in from slightly small while the old one drifts towards the viewer.
+                (fadeIn(tween(420, delayMillis = 90)) + scaleIn(tween(520, easing = FastOutSlowInEasing), initialScale = 0.96f)) togetherWith
+                    (fadeOut(tween(220)) + scaleOut(tween(320), targetScale = 1.04f))
+            },
+            label = "booth-screen",
+        ) { screen ->
             when (screen) {
                 BoothScreen.ATTRACT -> AttractScreen(state) { send(BoothIntent.StartSession) }
                 BoothScreen.SELECT -> LayoutSelectionScreen(state, { send(BoothIntent.SelectLayout(it)) }, { send(BoothIntent.BackToStart) })
@@ -57,8 +72,8 @@ fun BoothRoot(viewModel: BoothSessionViewModel, onAdminRequested: () -> Unit) {
         AdminHotspot(onTriggered = onAdminRequested, modifier = Modifier.align(Alignment.TopStart).safeDrawingPadding())
         if (state.printWaiting) {
             Box(
-                Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(20.dp).size(14.dp)
-                    .background(BoothColors.Retake.copy(alpha = 0.7f), androidx.compose.foundation.shape.CircleShape),
+                Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(20.dp).size(12.dp)
+                    .background(BoothColors.Retake.copy(alpha = 0.7f), CircleShape),
             )
         }
     } }

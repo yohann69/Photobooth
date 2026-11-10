@@ -60,8 +60,6 @@ sealed interface AdminIntent {
     data class SwitchEvent(val eventId: String) : AdminIntent
     data class UpdateActiveEvent(val transform: (EventEntity) -> EventEntity) : AdminIntent
     data class SetPhotoAspect(val aspect: PhotoAspect) : AdminIntent
-    data class SetEventBackgroundImage(val uri: Uri) : AdminIntent
-    data object RemoveEventBackgroundImage : AdminIntent
 
     data class ToggleLayout(val type: LayoutType, val enabled: Boolean) : AdminIntent
     data class ImportFrame(val type: LayoutType, val uri: Uri) : AdminIntent

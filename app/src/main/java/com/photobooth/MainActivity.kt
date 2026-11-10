@@ -12,9 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.ContextCompat
@@ -39,6 +37,7 @@ import com.photobooth.feature.app.EventPickerScreen
 import com.photobooth.feature.app.PinPadDialog
 import com.photobooth.feature.booth.BoothIntent
 import com.photobooth.feature.booth.BoothRoot
+import com.photobooth.feature.booth.BoothTheme
 import com.photobooth.feature.booth.BoothSessionViewModel
 import com.photobooth.feature.camera.CameraIntent
 import com.photobooth.feature.camera.CameraViewModel
@@ -66,7 +65,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            BoothTheme {
                 Surface {
                     val app by appViewModel.state.collectAsStateWithLifecycle()
                     val events by appViewModel.eventList.collectAsStateWithLifecycle()

@@ -43,7 +43,7 @@ fun EventPickerScreen(
             Column(Modifier.weight(1f)) {
                 Text("Choisir l'évènement", style = MaterialTheme.typography.displaySmall)
                 Text(
-                    "Les cadres, couleurs, filtres et réglages sont propres à chaque évènement.",
+                    "Les cadres et réglages sont propres à chaque évènement.",
                     style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

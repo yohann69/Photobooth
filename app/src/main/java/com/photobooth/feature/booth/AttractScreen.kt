@@ -9,16 +9,17 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,14 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -44,86 +45,62 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 import java.io.File
 
+/** Welcome screen: the event's name over its recent photos (or the ambient glow), and one thing to do. */
 @Composable
 fun AttractScreen(state: BoothUiState, onStart: () -> Unit) {
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val scale by pulse.animateFloat(
-        initialValue = 1f, targetValue = 1.02f,
-        animationSpec = infiniteRepeatable(tween(2_200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale",
-    )
-    val glow by pulse.animateFloat(
-        initialValue = 0.85f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2_200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "glow",
+    val breathe = rememberInfiniteTransition(label = "cta")
+    val scale by breathe.animateFloat(
+        1f, 1.04f, infiniteRepeatable(tween(1_800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale",
     )
 
     Box(
         Modifier.fillMaxSize()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onStart),
     ) {
-        val palette = LocalBoothPalette.current
-        if (state.slideshowEnabled && state.slideshow.isNotEmpty()) KenBurnsSlideshow(state.slideshow)
-        else if (palette.backgroundImage == null) AnimatedBackdrop()
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    listOf(palette.background.copy(alpha = 0.7f), palette.background.copy(alpha = 0.2f), palette.background.copy(alpha = 0.85f)),
+        if (state.slideshowEnabled && state.slideshow.isNotEmpty()) {
+            KenBurnsSlideshow(state.slideshow)
+            // Photos stay a backdrop: darkened overall, and more where the text sits.
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        listOf(
+                            BoothColors.Background.copy(alpha = 0.9f), BoothColors.Background.copy(alpha = 0.68f),
+                            BoothColors.Background.copy(alpha = 0.92f),
+                        ),
+                    ),
                 ),
-            ),
-        )
+            )
+        }
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().padding(56.dp)) {
-        val titleSp = (maxHeight.value * 0.13f).coerceIn(40f, 110f)
-        Column(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            val titleSp = (minOf(maxHeight.value * 0.13f, maxWidth.value * 0.085f)).coerceIn(40f, 120f)
+            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    state.event?.name ?: "Photobooth",
-                    color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,
-                    lineHeight = (titleSp * 1.08f).sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    "PHOTOBOOTH", Modifier.enter(0).glass(RoundedCornerShape(50)).padding(horizontal = 22.dp, vertical = 10.dp),
+                    color = BoothColors.Muted, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 5.sp,
                 )
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                state.message?.let {
-                    Text(it, color = BoothColors.Retake, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                    androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
-                }
-                Box(
-                    Modifier
-                        .graphicsLayer { scaleX = scale; scaleY = scale }
-                        .background(BoothColors.Accent.copy(alpha = glow), RoundedCornerShape(50))
-                        .padding(horizontal = 80.dp, vertical = 32.dp),
-                ) {
-                    Text("PRENDRE DES PHOTOS", color = BoothColors.OnAccent, fontSize = (titleSp * 0.42f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
+                Text(
+                    state.event?.name ?: "Photobooth", Modifier.enter(120),
+                    color = BoothColors.OnDark, fontSize = titleSp.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,
+                    lineHeight = (titleSp * 1.05f).sp, letterSpacing = (-1.5).sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Column(Modifier.enter(260), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    state.message?.let {
+                        Text(
+                            it, Modifier.glass(RoundedCornerShape(50), BoothColors.Retake.copy(alpha = 0.16f)).padding(horizontal = 28.dp, vertical = 12.dp),
+                            color = BoothColors.Retake, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                        )
+                    }
+                    Box(Modifier.padding(40.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.pulseOutline().graphicsLayer { scaleX = scale; scaleY = scale }
+                                .clip(CircleShape).background(BoothColors.AccentBrush).padding(horizontal = 72.dp, vertical = 30.dp),
+                        ) {
+                            Text("Touchez pour commencer", color = BoothColors.OnAccent, fontSize = (titleSp * 0.34f).coerceAtLeast(26f).sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
-        }
-    }
-}
-
-@Composable
-private fun AnimatedBackdrop() {
-    val accent = BoothColors.Accent
-    val accentAlt = BoothColors.AccentAlt
-    val base = BoothColors.Background
-    val t = rememberInfiniteTransition(label = "backdrop")
-    val phase by t.animateFloat(0f, 1f, infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse), label = "phase")
-    Canvas(Modifier.fillMaxSize()) {
-        drawRect(base)
-        drawRect(
-            Brush.radialGradient(
-                listOf(accent.copy(alpha = 0.55f), Color.Transparent),
-                center = Offset(size.width * (0.2f + 0.6f * phase), size.height * 0.3f), radius = size.minDimension * 0.9f,
-            ),
-        )
-        drawRect(
-            Brush.radialGradient(
-                listOf(accentAlt.copy(alpha = 0.40f), Color.Transparent),
-                center = Offset(size.width * (0.8f - 0.6f * phase), size.height * 0.75f), radius = size.minDimension * 0.9f,
-            ),
-        )
     }
 }
 

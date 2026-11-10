@@ -13,9 +13,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Owns the on-disk layout of an event: `<root>/Photobooth/<EventId>_<Name>/{Originals,Composited_Prints,Frames,Theme,Sessions}`.
+ * Owns the on-disk layout of an event: `<root>/Photobooth/<EventId>_<Name>/{Originals,Composited_Prints,Frames,Sessions}`.
  * A guest session lives in `Sessions/<SessionId>/{Originals/Photo_N.jpg, Montage_Final.jpg}`; it counts as validated once the montage exists.
- * Frames and theme images live inside the event folder so they are never shared between events.
+ * Frames live inside the event folder so they are never shared between events.
  */
 @Singleton
 class EventStorage @Inject constructor(
@@ -91,11 +91,10 @@ class EventStorage @Inject constructor(
         const val ORIGINALS = "Originals"
         const val COMPOSITED_PRINTS = "Composited_Prints"
         const val FRAMES = "Frames"
-        const val THEME = "Theme"
         const val SESSIONS = "Sessions"
         const val MONTAGE_FILE = "Montage_Final.jpg"
         const val TEST_PREFIX = "TEST_"
-        val SUBFOLDERS = listOf(ORIGINALS, COMPOSITED_PRINTS, FRAMES, THEME, SESSIONS)
+        val SUBFOLDERS = listOf(ORIGINALS, COMPOSITED_PRINTS, FRAMES, SESSIONS)
         private val PHOTO_EXTENSIONS = setOf("jpg", "jpeg")
     }
 }

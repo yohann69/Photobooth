@@ -27,8 +27,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Stores an event's custom frame overlays (PNG with transparency) and theme images. Callers pass the owning
- * event's `Frames` / `Theme` folder, so nothing written here can be seen by another event.
+ * Stores an event's custom frame overlays (PNG with transparency). Callers pass the owning
+ * event's `Frames` folder, so nothing written here can be seen by another event.
  */
 @Singleton
 class FrameStorage @Inject constructor(
@@ -49,27 +49,6 @@ class FrameStorage @Inject constructor(
                 throw IOException("Selected file is not a PNG image")
             }
             target
-        }
-    }
-
-    /** Copies a picked JPEG/PNG into [themeDir] as the event's fullscreen guest background. */
-    suspend fun importBackground(themeDir: File, uri: Uri): Result<File> = withContext(io) {
-        runCatching {
-            themeDir.mkdirs()
-            val temp = File(themeDir, "background_${System.currentTimeMillis()}.tmp")
-            val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Cannot open the selected file")
-            input.use { src -> FileOutputStream(temp).use { out -> src.copyTo(out) } }
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(temp.absolutePath, bounds)
-            val extension = when (bounds.outMimeType) {
-                "image/png" -> "png"
-                "image/jpeg" -> "jpg"
-                else -> {
-                    temp.delete()
-                    throw IOException("Background must be a JPEG or PNG image")
-                }
-            }
-            File(themeDir, "background_${System.currentTimeMillis()}.$extension").also { temp.renameTo(it) }
         }
     }
 
@@ -131,11 +110,11 @@ class FrameStorage @Inject constructor(
         }
     }
 
-    /** Removes a stored file, but only from an event's Frames or Theme folder. */
+    /** Removes a stored file, but only from an event's Frames folder. */
     fun delete(path: String?) {
         if (path == null) return
         val file = File(path)
-        if (file.parentFile?.name in setOf(EventStorage.FRAMES, EventStorage.THEME)) file.delete()
+        if (file.parentFile?.name == EventStorage.FRAMES) file.delete()
     }
 
     /** Pixel size of a stored frame, or null if unreadable. */

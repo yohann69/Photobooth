@@ -22,8 +22,11 @@ import com.photobooth.data.db.entity.SessionLogEntity
         PrintJobEntity::class,
         SessionLogEntity::class,
     ],
-    version = 8,
-    autoMigrations = [AutoMigration(from = 7, to = 8, spec = DropEventFilters::class)],
+    version = 9,
+    autoMigrations = [
+        AutoMigration(from = 7, to = 8, spec = DropEventFilters::class),
+        AutoMigration(from = 8, to = 9, spec = DropEventThemes::class),
+    ],
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -41,3 +44,13 @@ abstract class PhotoboothDatabase : RoomDatabase() {
 /** Photo filters were removed from the app. */
 @DeleteColumn(tableName = "events", columnName = "enabledFilters")
 class DropEventFilters : AutoMigrationSpec
+
+/** Per-event colours and background image were removed: every event shares the booth's dark look. */
+@DeleteColumn.Entries(
+    DeleteColumn(tableName = "events", columnName = "primaryColorHex"),
+    DeleteColumn(tableName = "events", columnName = "secondaryColorHex"),
+    DeleteColumn(tableName = "events", columnName = "backgroundColorHex"),
+    DeleteColumn(tableName = "events", columnName = "textColorHex"),
+    DeleteColumn(tableName = "events", columnName = "customBackgroundImagePath"),
+)
+class DropEventThemes : AutoMigrationSpec

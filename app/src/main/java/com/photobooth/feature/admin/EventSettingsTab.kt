@@ -37,6 +37,5 @@ fun EventSettingsTab(state: AdminUiState, onIntent: (AdminIntent) -> Unit) {
             }
         }
         ActiveEventSettings(event, onIntent)
-        ThemeEditorCard(event, onIntent)
     }
 }
