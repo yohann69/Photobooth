@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -73,21 +74,25 @@ private fun UploadServerCard(state: AdminUiState, onIntent: (AdminIntent) -> Uni
     val s = state.settings
     var url by remember(s.uploadBaseUrl) { mutableStateOf(s.uploadBaseUrl) }
     var token by remember(s.uploadToken) { mutableStateOf(s.uploadToken) }
-    SectionCard("Online gallery server") {
+    SectionCard("Transat sharing (Google Drive + QR code)") {
         Text(
-            "Each photo is uploaded 2.5 s after it is taken, removed again if the guest retakes it or cancels, and the final montage " +
-                "returns the download link shown in the QR code. Turn it on per event in Event settings.",
+            "Each validated photo is sent to the event's Photobooth folder on the Transat Drive a moment later, and the collage " +
+                "when the guest prints; the QR code then opens a permanent page on transat.dev with every picture in full quality. " +
+                "A cancelled session is removed from the Drive. Turn it on per event in Event settings.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
-            url, { url = it }, label = { Text("Server URL") }, placeholder = { Text("https://example.com") },
+            url, { url = it }, label = { Text("Transat API URL") }, placeholder = { Text("https://api.transat.dev") },
             singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
-            token, { token = it }, label = { Text("Bearer token") }, singleLine = true,
+            token, { token = it }, label = { Text("Booth key (id.secret)") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
         )
-        PrimaryAction("Save upload server") { onIntent(AdminIntent.SaveUpload(url, token)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onIntent(AdminIntent.TestUpload(url, token)) }) { Text("Test connection") }
+        }
+        PrimaryAction("Save sharing settings") { onIntent(AdminIntent.SaveUpload(url, token)) }
     }
 }
 

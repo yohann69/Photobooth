@@ -79,6 +79,7 @@ sealed interface AdminIntent {
     data class SetDnpOrientation(val flipVertical: Boolean, val mirror: Boolean, val portraitClockwise: Boolean) : AdminIntent
     data class PrintTestSheet(val portrait: Boolean) : AdminIntent
     data class SaveUpload(val baseUrl: String, val token: String) : AdminIntent
+    data class TestUpload(val baseUrl: String, val token: String) : AdminIntent
     data class CancelPrintJob(val jobId: Long) : AdminIntent
     data object CancelAllPrintJobs : AdminIntent
     data class ChangePin(val currentPin: String, val newPin: String) : AdminIntent

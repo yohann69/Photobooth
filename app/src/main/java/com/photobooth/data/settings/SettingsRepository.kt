@@ -35,7 +35,7 @@ data class AppSettings(
     val dnpPortraitClockwise: Boolean = true,
     val ccapiHost: String = "",
     val ccapiPort: Int = 8080,
-    /** Online gallery server; uploads are skipped while either field is empty. */
+    /** Transat backend and this booth's key ("id.secret", stored encrypted); uploads are skipped while either is empty. */
     val uploadBaseUrl: String = "",
     val uploadToken: String = "",
 ) {
@@ -60,7 +60,7 @@ class SettingsRepository @Inject constructor(
             ccapiHost = p[CCAPI_HOST].orEmpty(),
             ccapiPort = p[CCAPI_PORT] ?: 8080,
             uploadBaseUrl = p[UPLOAD_BASE_URL].orEmpty(),
-            uploadToken = p[UPLOAD_TOKEN].orEmpty(),
+            uploadToken = SecretBox.open(p[UPLOAD_TOKEN]),
         )
     }
 
@@ -109,7 +109,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setUpload(baseUrl: String, token: String) {
         store.edit {
             it[UPLOAD_BASE_URL] = baseUrl.trim().trimEnd('/')
-            it[UPLOAD_TOKEN] = token.trim()
+            it[UPLOAD_TOKEN] = SecretBox.seal(token.trim())
         }
     }
 

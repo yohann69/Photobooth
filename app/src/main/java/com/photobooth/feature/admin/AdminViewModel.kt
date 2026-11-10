@@ -23,6 +23,7 @@ import com.photobooth.render.DummyPhotos
 import com.photobooth.render.PhotoCompositorEngine
 import com.photobooth.render.PhotoDecoder
 import com.photobooth.render.PhotoSupplier
+import com.photobooth.share.UploadManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -60,6 +61,7 @@ class AdminViewModel @Inject constructor(
     private val camera: UniversalCanonManager,
     private val printController: PrintController,
     private val dnp: DnpPrinterLink,
+    private val uploads: UploadManager,
 ) : ViewModel() {
 
     private data class Local(val tab: AdminTab = AdminTab.DASHBOARD, val message: String? = null, val selfTest: SelfTestState = SelfTestState.Idle)
@@ -164,6 +166,12 @@ class AdminViewModel @Inject constructor(
             is AdminIntent.SaveUpload -> launch {
                 settingsRepository.setUpload(intent.baseUrl, intent.token)
                 post("Upload server saved")
+            }
+            is AdminIntent.TestUpload -> launch {
+                post("Testing connection…")
+                uploads.testConnection(intent.baseUrl, intent.token)
+                    .onSuccess { post("Connection OK: the server accepts this booth key") }
+                    .onFailure { post("Connection failed: ${it.message}") }
             }
             is AdminIntent.CancelPrintJob -> launch {
                 printController.cancel(intent.jobId)

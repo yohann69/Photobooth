@@ -207,7 +207,6 @@ class BoothSessionViewModel @Inject constructor(
             camera.captureHighResPhoto(file)
                 .onSuccess {
                     Log.i(TAG, "BoothSession: slot ${slot + 1} captured ${it.name} ${it.length()} bytes")
-                    uploadContext()?.let { ctx -> uploads.scheduleShot(ctx, slot + 1, it) }
                     val composition = renderComposition(it, slot)
                     _state.update { cur -> cur.copy(reviewFile = it, reviewPreview = composition, smile = false) }
                     go(BoothStep.REVIEW)
@@ -248,6 +247,8 @@ class BoothSessionViewModel @Inject constructor(
         val photos = s.photos.toMutableList().also { it[s.slotIndex] = file }
         val next = photos.indexOfFirst { it == null }
         Log.i(TAG, "BoothSession: kept ${file.name} for slot ${s.slotIndex + 1}/${photos.size}")
+        // Validated: it goes to the event's Drive folder in the background while the guest carries on.
+        uploadContext()?.let { ctx -> uploads.scheduleShot(ctx, s.slotIndex + 1, file) }
         _state.update { it.copy(photos = photos, reviewFile = null, reviewPreview = null, slotIndex = if (next >= 0) next else it.slotIndex) }
         if (next >= 0) {
             go(BoothStep.LIVE)
@@ -266,7 +267,6 @@ class BoothSessionViewModel @Inject constructor(
             val clearedOnCamera = camera.deleteFromCamera(file)
             Log.i(TAG, "BoothSession: rejected ${file.name} deletedFromTablet=$deleted existsAfter=${file.exists()} cameraCopyRemoved=$clearedOnCamera")
             retakes++
-            session?.let { uploads.cancelShot(it.id, s.slotIndex + 1) }
             val without = renderComposition(null, s.slotIndex)
             Log.i(TAG, "BoothSession: progressive composition re-rendered without ${file.name} (ok=${without != null})")
             _state.update { it.copy(reviewFile = null, reviewPreview = without) }
@@ -343,7 +343,7 @@ class BoothSessionViewModel @Inject constructor(
             Log.i(TAG, "BoothSession: session ${current.id} validated: ${photoFiles.size} originals + ${montage.name} kept in ${montage.parentFile?.name}")
             val sharing = uploads.isEnabledFor(event)
             _state.update { it.copy(isRendering = false, share = null, shareLoading = sharing, shareFailed = false) }
-            if (sharing) publishMontage(current.id, cfg.layoutType, montage)
+            if (sharing) publishMontage(current.id, cfg.layoutType, montage, photoFiles)
 
             val finished = current.copy(
                 photosCaptured = photoFiles.size,
@@ -355,17 +355,21 @@ class BoothSessionViewModel @Inject constructor(
             session = finished
             sessionLogs.finish(finished, SessionOutcome.COMPLETED)
             sessionFinished = true
-            uploads.complete(current.id)
+            if (!sharing) uploads.complete(current.id)
 
             startThanksTimer()
         }
     }
 
-    /** Uploads the montage in the background; the QR code appears as soon as the server returns the link. */
-    private fun publishMontage(sessionId: String, layoutType: LayoutType, montage: File) {
+    /**
+     * Uploads the collage (and any photo still missing) in the background; the QR code appears as soon as the
+     * backend has every picture and returns the permanent link.
+     */
+    private fun publishMontage(sessionId: String, layoutType: LayoutType, montage: File, photos: List<File>) {
         val event = _state.value.event ?: return
         viewModelScope.launch {
-            val result = uploads.uploadMontage(UploadContext.of(sessionId, event, layoutType), montage)
+            val result = uploads.publish(UploadContext.of(sessionId, event, layoutType), montage, photos.size, photos)
+            uploads.complete(sessionId)
             if (session?.id != sessionId) return@launch // already back on the welcome screen
             val url = result.getOrNull()
             if (url == null) {
@@ -391,6 +395,9 @@ class BoothSessionViewModel @Inject constructor(
     private fun startThanksTimer() {
         thanksJob?.cancel()
         thanksJob = viewModelScope.launch {
+            // The countdown waits while the QR code is being prepared, so guests get to scan it.
+            val giveUpAt = SystemClock.elapsedRealtime() + SHARE_WAIT_MAX_MS
+            while (_state.value.shareLoading && SystemClock.elapsedRealtime() < giveUpAt) delay(250)
             for (sec in THANKS_SECONDS downTo 1) {
                 _state.update { it.copy(thanksSecondsLeft = sec) }
                 delay(1_000)
@@ -488,6 +495,7 @@ class BoothSessionViewModel @Inject constructor(
         val IDLE_GUARDED = setOf(BoothStep.SELECT_LAYOUT, BoothStep.LIVE, BoothStep.REVIEW, BoothStep.FINAL)
         const val IDLE_TIMEOUT_MS = 90_000L
         const val THANKS_SECONDS = 15
+        const val SHARE_WAIT_MAX_MS = 90_000L
         const val MAX_COPIES = 5
         const val SMILE_MS = 450L
         const val FOCUS_AT_SECOND = 2
