@@ -89,10 +89,10 @@ fun CaptureAndReviewScreen(
     var confirmAbort by remember { mutableStateOf(false) }
     LaunchedEffect(state.step) { if (state.step != BoothStep.LIVE && state.step != BoothStep.REVIEW) confirmAbort = false }
     val zoom by animateFloatAsState(if (zoomed) 1f else 0f, tween(550, easing = FastOutSlowInEasing), label = "zoom")
-    // The screen blinks dark at the instant of the shot, like a shutter closing.
+    // The screen blinks dark when the camera's shutter really fires (a DSLR may focus for seconds before), like a shutter closing.
     val blink = remember { Animatable(0f) }
-    LaunchedEffect(state.step) {
-        if (state.step == BoothStep.CAPTURING) {
+    LaunchedEffect(state.shutterFired) {
+        if (state.shutterFired) {
             blink.animateTo(0.85f, tween(70))
             blink.animateTo(0f, tween(260))
         }
@@ -250,10 +250,23 @@ private fun CountdownOrSmile(state: BoothUiState, height: Dp) {
     } else {
         val pop = remember { Animatable(0.6f) }
         LaunchedEffect(Unit) { pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium)) }
-        Image(
-            rememberBigText("Souriez !", 300f, BoothColors.OnDark.toArgb()), "Souriez !",
-            Modifier.height(height * 0.6f).graphicsLayer { scaleX = pop.value; scaleY = pop.value }, contentScale = ContentScale.Fit,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                rememberBigText("Souriez !", 300f, BoothColors.OnDark.toArgb()), "Souriez !",
+                Modifier.height(height * 0.6f).graphicsLayer { scaleX = pop.value; scaleY = pop.value }, contentScale = ContentScale.Fit,
+            )
+            // Until the shutter fires, the guests must hold still: the camera may still be focusing.
+            val holdStill = state.step == BoothStep.CAPTURING && !state.shutterFired
+            Text(
+                if (holdStill) "Ne bougez pas, photo en cours…" else " ",
+                color = BoothColors.OnDark,
+                fontSize = 44.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 18f)),
+                modifier = Modifier.background(Color.Black.copy(alpha = if (holdStill) 0.35f else 0f), RoundedCornerShape(40.dp)).padding(horizontal = 32.dp, vertical = 10.dp),
+            )
+        }
     }
 }
 

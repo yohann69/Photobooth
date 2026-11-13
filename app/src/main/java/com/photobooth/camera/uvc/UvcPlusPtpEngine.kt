@@ -78,6 +78,8 @@ class UvcPlusPtpEngine(
 
     override suspend fun prepareCapture() = ptp.prepareCapture()
 
+    override val shutterEvents get() = ptp.shutterEvents
+
     override suspend fun deleteFromCamera(file: File): Boolean = ptp.deleteFromCamera(file)
 
     override suspend fun disconnect() {

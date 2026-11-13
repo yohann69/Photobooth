@@ -22,6 +22,8 @@ import com.photobooth.core.PhotoboothLog.TAG
 import com.photobooth.data.settings.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,6 +78,9 @@ class UniversalCanonManager @Inject constructor(
 
     private val _frames = MutableSharedFlow<Bitmap>(replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val liveViewFrameFlow: SharedFlow<Bitmap> = _frames.asSharedFlow()
+
+    private val _shutter = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val shutterEvents: SharedFlow<Unit> = _shutter.asSharedFlow()
 
     private val _rotation = MutableStateFlow(0)
     override val liveViewRotationDegrees: StateFlow<Int> = _rotation.asStateFlow()
@@ -374,7 +379,16 @@ class UniversalCanonManager @Inject constructor(
 
     override suspend fun captureHighResPhoto(targetFile: File): Result<File> {
         val engine = active ?: return Result.failure(IllegalStateException("No camera connected"))
-        return captureMutex.withLock { engine.captureHighResPhoto(targetFile) }
+        return captureMutex.withLock {
+            coroutineScope {
+                val forward = launch(start = CoroutineStart.UNDISPATCHED) { engine.shutterEvents.collect { _shutter.tryEmit(Unit) } }
+                try {
+                    engine.captureHighResPhoto(targetFile)
+                } finally {
+                    forward.cancel()
+                }
+            }
+        }
     }
 
     override suspend fun prepareCapture() {

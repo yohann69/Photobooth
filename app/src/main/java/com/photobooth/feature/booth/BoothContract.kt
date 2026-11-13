@@ -26,6 +26,8 @@ data class BoothUiState(
     val slotIndex: Int = 0,
     val countdown: Int = 0,
     val smile: Boolean = false,
+    /** The camera's shutter has fired for the shot in progress (a DSLR may still be focusing before that). */
+    val shutterFired: Boolean = false,
     val reviewFile: File? = null,
     /** Final composition with the new photo already in its slot; shown instead of the raw photo while reviewing. */
     val reviewPreview: Bitmap? = null,

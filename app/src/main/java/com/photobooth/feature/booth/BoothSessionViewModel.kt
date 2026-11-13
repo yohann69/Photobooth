@@ -33,7 +33,9 @@ import com.photobooth.share.UploadManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -184,7 +186,7 @@ class BoothSessionViewModel @Inject constructor(
         if (!s.cameraReady) return post("Caméra indisponible")
         countdownJob = viewModelScope.launch {
             val seconds = event.countdownSeconds.coerceAtLeast(1)
-            _state.update { it.copy(smile = false, message = null) }
+            _state.update { it.copy(smile = false, shutterFired = false, message = null) }
             go(BoothStep.COUNTDOWN)
             var focus: Job? = null
             for (n in seconds downTo 1) {
@@ -203,9 +205,18 @@ class BoothSessionViewModel @Inject constructor(
             val slot = _state.value.slotIndex
             val file = newPhotoFile(event, slot)
             capturingFile = file
+            val shutter = launch(start = CoroutineStart.UNDISPATCHED) {
+                camera.shutterEvents.first()
+                Log.i(TAG, "BoothSession: shutter fired")
+                _state.update { it.copy(shutterFired = true) }
+            }
             go(BoothStep.CAPTURING)
-            camera.captureHighResPhoto(file)
+            val result = camera.captureHighResPhoto(file)
+            shutter.cancel()
+            result
                 .onSuccess {
+                    // Cameras that do not report the shutter flash now, on the photo itself.
+                    _state.update { cur -> cur.copy(shutterFired = true) }
                     Log.i(TAG, "BoothSession: slot ${slot + 1} captured ${it.name} ${it.length()} bytes")
                     val composition = renderComposition(it, slot)
                     _state.update { cur -> cur.copy(reviewFile = it, reviewPreview = composition, smile = false) }

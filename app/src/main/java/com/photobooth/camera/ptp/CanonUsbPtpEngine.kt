@@ -69,6 +69,9 @@ class CanonUsbPtpEngine(
     private val _frames = MutableSharedFlow<Bitmap>(replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val liveViewFrameFlow: SharedFlow<Bitmap> = _frames.asSharedFlow()
 
+    private val _shutter = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val shutterEvents: SharedFlow<Unit> = _shutter.asSharedFlow()
+
     private val _rotation = MutableStateFlow(0)
     override val liveViewRotationDegrees: StateFlow<Int> = _rotation.asStateFlow()
 
@@ -120,8 +123,21 @@ class CanonUsbPtpEngine(
         transport = t
         Log.i(TAG, "CanonUsbPtpEngine: using interface #${endpoints.iface.id} bulkIn=0x${endpoints.bulkIn.address.toString(16)} bulkOut=0x${endpoints.bulkOut.address.toString(16)} maxPacket=${endpoints.bulkIn.maxPacketSize}")
 
+        // A reply left over from a previous connection (app killed mid-shot) would be read as ours.
+        val stale = t.drain()
+        if (stale > 0) Log.w(TAG, "CanonUsbPtpEngine: dropped ${stale}B of stale data from the camera")
         val infoBuffer = GrowableBuffer(4096)
-        t.executeOk(Ptp.OC_GET_DEVICE_INFO, sink = infoBuffer)
+        try {
+            t.executeOk(Ptp.OC_GET_DEVICE_INFO, sink = infoBuffer)
+        } catch (e: PtpException) {
+            throw e
+        } catch (e: IOException) {
+            Log.w(TAG, "CanonUsbPtpEngine: camera not answering (${e.message}), resetting the PTP link")
+            t.recover(endpoints.iface.id)
+            t.trace = true
+            infoBuffer.reset()
+            t.executeOk(Ptp.OC_GET_DEVICE_INFO, sink = infoBuffer)
+        }
         val info = PtpDeviceInfo.parse(infoBuffer.array, infoBuffer.size)
         deviceInfo = info
         Log.i(TAG, "CanonUsbPtpEngine: device manufacturer='${info.manufacturer}' model='${info.model}' vendorExt=0x${info.vendorExtensionId.toString(16)} " +
@@ -227,6 +243,10 @@ class CanonUsbPtpEngine(
                     Log.e(TAG, "CanonUsbPtpEngine: USB I/O failure in live view: ${e.message}")
                     _state.value = CameraConnectionState.Failed("USB I/O error: ${e.message}")
                     return@launch
+                } catch (e: IllegalStateException) {
+                    Log.e(TAG, "CanonUsbPtpEngine: USB state failure in live view: ${e.message}")
+                    _state.value = CameraConnectionState.Failed("USB I/O error: ${e.message}")
+                    return@launch
                 }
 
                 if (span == null) {
@@ -255,6 +275,20 @@ class CanonUsbPtpEngine(
     }
 
     // ---- Capture -----------------------------------------------------------------------------
+
+    @Volatile private var prefocusedAt = 0L
+
+    /** Runs the live view autofocus during the countdown so the shutter does not wait for it. */
+    override suspend fun prepareCapture() = withContext(Dispatchers.IO) {
+        if (!isEos || CanonEos.OC_DO_AF !in deviceInfo?.operations.orEmpty()) return@withContext
+        ptpLock.withLock {
+            val t = transport ?: return@withLock
+            val started = SystemClock.elapsedRealtime()
+            val r = t.execute(CanonEos.OC_DO_AF, readTimeoutMs = AF_TIMEOUT_MS)
+            if (r.isOk) prefocusedAt = SystemClock.elapsedRealtime()
+            Log.i(TAG, "CanonUsbPtpEngine: prefocus DoAf -> ${hex(r.code)} in ${SystemClock.elapsedRealtime() - started} ms")
+        }
+    }
 
     override suspend fun captureHighResPhoto(targetFile: File): Result<File> = withContext(Dispatchers.IO) {
         captureMutex.withLock {
@@ -292,6 +326,7 @@ class CanonUsbPtpEngine(
         Log.i(TAG, "CanonUsbPtpEngine: objects on camera before shot: ${before?.size ?: "unknown"}")
         readEosEventsLocked(log = true) // drop stale object events
         val early = fireShutterLocked()
+        _shutter.tryEmit(Unit)
         val obj = awaitEosObjectLocked(before, early)
         Log.i(TAG, "CanonUsbPtpEngine: downloading oid=0x${obj.oid.toString(16)} name='${obj.name}' size=${obj.size} ofc=0x${obj.ofc.toString(16)}")
         val file = downloadObjectLocked(obj.oid, obj.size, target)
@@ -324,12 +359,20 @@ class CanonUsbPtpEngine(
             throw PtpException(Ptp.RC_DEVICE_BUSY, "Camera stayed busy; capture not initiated")
         }
         val seen = ArrayList<EosObject>()
-        val half = t.execute(CanonEos.OC_REMOTE_RELEASE_ON, intArrayOf(HALF_PRESS, 0))
-        Log.i(TAG, "CanonUsbPtpEngine: half press -> ${hex(half.code)} params=${half.params.joinToString { "0x" + it.toString(16) }}")
+        val pressedAt = SystemClock.elapsedRealtime()
+        // Focus was just done during the countdown: press without a second autofocus run.
+        val skipAf = pressedAt - prefocusedAt < PREFOCUS_VALID_MS
+        // Entry-level bodies (2000D) only answer the half press once autofocus is over, which takes seconds in live view.
+        var half = t.execute(CanonEos.OC_REMOTE_RELEASE_ON, intArrayOf(HALF_PRESS, if (skipAf) 1 else 0), readTimeoutMs = AF_TIMEOUT_MS)
+        if (skipAf && !half.isOk) {
+            Log.w(TAG, "CanonUsbPtpEngine: half press without AF refused (${hex(half.code)}), pressing with AF")
+            half = t.execute(CanonEos.OC_REMOTE_RELEASE_ON, intArrayOf(HALF_PRESS, 0), readTimeoutMs = AF_TIMEOUT_MS)
+        }
+        Log.i(TAG, "CanonUsbPtpEngine: half press (skipAf=$skipAf) -> ${hex(half.code)} params=${half.params.joinToString { "0x" + it.toString(16) }} in ${SystemClock.elapsedRealtime() - pressedAt} ms")
         var pressed = false
         try {
             if (!half.isOk) throw PtpException(half.code, "Half press refused: 0x${half.code.toString(16)}")
-            val focusUntil = SystemClock.elapsedRealtime() + HALF_PRESS_HOLD_MS
+            val focusUntil = pressedAt + HALF_PRESS_HOLD_MS
             while (SystemClock.elapsedRealtime() < focusUntil) {
                 seen += readEosEventsLocked(log = true)
                 delay(EVENT_POLL_MS)
@@ -456,6 +499,7 @@ class CanonUsbPtpEngine(
     private suspend fun captureStandardLocked(target: File): File {
         val before = objectHandlesLocked()
         fireShutterLocked()
+        _shutter.tryEmit(Unit)
         val deadline = SystemClock.elapsedRealtime() + CAPTURE_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
             val added = objectHandlesLocked() - before
@@ -581,6 +625,8 @@ class CanonUsbPtpEngine(
         const val HALF_PRESS = 1
         const val FULL_PRESS = 2
         const val HALF_PRESS_HOLD_MS = 1_200L
+        const val AF_TIMEOUT_MS = 15_000L
+        const val PREFOCUS_VALID_MS = 8_000L
         const val FULL_PRESS_RETRY_MS = 150L
         const val RAW_COMPANION_WAIT_MS = 300L
         const val MAX_FALLBACKS = 2
