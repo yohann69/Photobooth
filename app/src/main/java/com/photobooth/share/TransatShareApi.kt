@@ -59,6 +59,46 @@ class RemoteFrame(val layoutType: String, val sha256: String, val width: Int, va
 
 class FrameLinkStatus(val expired: Boolean, val uploads: List<RemoteFrame>)
 
+/** An event prepared in the Transat admin panel. [date] is yyyy-MM-dd; [photoAspect] a [com.photobooth.domain.model.PhotoAspect] name. */
+class RemoteEvent(
+    val id: Long,
+    val name: String,
+    val date: String,
+    val photoAspect: String,
+    val countdownSeconds: Int,
+    val maxPrintsPerSession: Int,
+    val allowRetakes: Boolean,
+    val digitalShare: Boolean,
+    val attractSlideshow: Boolean,
+    val mirrorLivePreview: Boolean,
+    val layouts: List<RemoteLayout>,
+) {
+    companion object {
+        fun parse(json: JSONObject): RemoteEvent {
+            val list = json.optJSONArray("layouts") ?: JSONArray()
+            return RemoteEvent(
+                id = json.getLong("id"),
+                name = json.getString("name"),
+                date = json.getString("date"),
+                photoAspect = json.optString("photo_aspect"),
+                countdownSeconds = json.optInt("countdown_seconds", 5),
+                maxPrintsPerSession = json.optInt("max_prints_per_session", 5),
+                allowRetakes = json.optBoolean("allow_retakes", true),
+                digitalShare = json.optBoolean("digital_share", true),
+                attractSlideshow = json.optBoolean("attract_slideshow", true),
+                mirrorLivePreview = json.optBoolean("mirror_live_preview", true),
+                layouts = (0 until list.length()).map { i ->
+                    val l = list.getJSONObject(i)
+                    RemoteLayout(l.getString("type"), l.optBoolean("enabled"), l.optJSONObject("frame")?.optString("sha256")?.takeIf { it.isNotEmpty() })
+                },
+            )
+        }
+    }
+}
+
+/** One layout of a server event: switched on or not, and the hash of its frame if it has one. */
+class RemoteLayout(val type: String, val enabled: Boolean, val frameSha256: String?)
+
 class StartedUpload(val fileId: Long, val uploadUrl: String, val fileName: String)
 
 /** A non-2xx answer. 4xx other than 408/429 will not get better by retrying. */
@@ -138,8 +178,11 @@ class TransatShareApi @Inject constructor() {
      * Opens a temporary link where the organisers send the frame of each layout ([layouts]: the geometry the page
      * draws the templates from). The link is shown as a QR code; the booth then polls [frameUploads].
      */
-    fun openFrameLink(server: TransatServer, eventName: String, layouts: JSONArray): Result<FrameLink> = runCatching {
-        val json = JSONObject(call(server, "POST", "/photobooth/booth/frame-sessions", JSONObject().put("event_name", eventName).put("layouts", layouts).toString()))
+    fun openFrameLink(server: TransatServer, eventName: String, remoteEventId: Long?, layouts: JSONArray): Result<FrameLink> = runCatching {
+        val body = JSONObject().put("event_name", eventName).put("layouts", layouts)
+        // The server files the frames in its copy of the event too.
+        if (remoteEventId != null) body.put("event_id", remoteEventId)
+        val json = JSONObject(call(server, "POST", "/photobooth/booth/frame-sessions", body.toString()))
         val url = json.getString("url")
         require(url.startsWith("https://") || (BuildConfig.DEBUG && URL(url).host in LOCAL_HOSTS)) { "unexpected frame link" }
         FrameLink(json.getLong("id"), url, OffsetDateTime.parse(json.getString("expires_at")).toInstant().toEpochMilli())
@@ -168,6 +211,26 @@ class TransatShareApi @Inject constructor() {
 
     fun closeFrameLink(server: TransatServer, linkId: Long): Result<Unit> = runCatching {
         call(server, "DELETE", "/photobooth/booth/frame-sessions/$linkId", null)
+    }
+
+    /** Events prepared in the Transat admin panel: recent and upcoming ones, with their settings and layouts. */
+    fun events(server: TransatServer): Result<List<RemoteEvent>> = runCatching {
+        val list = JSONObject(call(server, "GET", "/photobooth/booth/events", null)).getJSONArray("events")
+        (0 until list.length()).map { RemoteEvent.parse(list.getJSONObject(it)) }
+    }
+
+    /** The frame of one layout of a server event; checked against the hash the server announced. */
+    fun downloadEventFrame(server: TransatServer, eventId: Long, layoutType: String, sha256: String): Result<ByteArray> = runCatching {
+        require(LAYOUT_TYPE.matches(layoutType)) { "invalid layout type" }
+        val bytes = request(server, "GET", "/photobooth/booth/events/$eventId/frames/$layoutType", null)
+        val sum = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
+        if (!sum.equals(sha256, ignoreCase = true)) throw IOException("frame changed while downloading")
+        bytes
+    }
+
+    /** Sends the app's layout catalog (see [LayoutGeometry.catalog]); the admin panel draws its templates from it. */
+    fun publishLayouts(server: TransatServer, catalog: JSONObject): Result<Unit> = runCatching {
+        call(server, "PUT", "/photobooth/booth/layouts", catalog.toString())
     }
 
     private fun session(id: String): String {

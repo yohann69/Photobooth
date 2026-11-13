@@ -36,6 +36,8 @@ data class EventLayoutConfigEntity(
     @ColumnInfo(defaultValue = "0") val slotPaddingPx: Int = 0,
     @ColumnInfo(defaultValue = "0") val slotOffsetXPx: Int = 0,
     @ColumnInfo(defaultValue = "0") val slotOffsetYPx: Int = 0,
+    /** SHA-256 of the frame downloaded from the Transat server; null when the frame (if any) was set on the tablet. */
+    val remoteFrameSha256: String? = null,
 ) {
     /** One slot per shot the guest takes (the first slot showing it); previews use its shape. */
     fun captureSlots(): List<PhotoSlot> {

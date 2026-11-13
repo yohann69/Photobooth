@@ -22,10 +22,12 @@ import com.photobooth.data.db.entity.SessionLogEntity
         PrintJobEntity::class,
         SessionLogEntity::class,
     ],
-    version = 9,
+    version = 10,
     autoMigrations = [
         AutoMigration(from = 7, to = 8, spec = DropEventFilters::class),
         AutoMigration(from = 8, to = 9, spec = DropEventThemes::class),
+        /** Events and frames downloaded from the Transat server. */
+        AutoMigration(from = 9, to = 10),
     ],
     exportSchema = true,
 )

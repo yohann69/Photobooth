@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.photobooth.core.EventDates
 import com.photobooth.data.db.entity.EventEntity
 import com.photobooth.feature.admin.EventCreatorDialog
+import com.photobooth.share.EventSyncState
 
 /** First screen of every launch: confirm the running event, switch to another one or start a new one. */
 @Composable
@@ -37,6 +38,8 @@ fun EventPickerScreen(
     onPick: (String) -> Unit,
     onCreate: (String, Long) -> Unit,
     onSettings: () -> Unit,
+    sync: EventSyncState = EventSyncState.Idle,
+    onSync: () -> Unit = {},
 ) {
     var creating by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(40.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -49,10 +52,22 @@ fun EventPickerScreen(
                 )
             }
             OutlinedButton(
+                onClick = onSync,
+                enabled = sync != EventSyncState.Running && sync != EventSyncState.NotConfigured,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+            ) { Text(if (sync == EventSyncState.Running) "Synchronisation…" else "Synchroniser") }
+            OutlinedButton(
                 onClick = onSettings,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
             ) { Text("Réglages de l'application") }
             Button(onClick = { creating = true }) { Text("Nouvel évènement") }
+        }
+        syncMessage(sync)?.let { (text, isError) ->
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(events, key = { it.id }) { event -> EventRow(event, onClick = { onPick(event.id) }) }
@@ -66,6 +81,18 @@ fun EventPickerScreen(
     if (creating) EventCreatorDialog(onCreate = { name, date -> creating = false; onCreate(name, date) }, onDismiss = { creating = false })
 }
 
+/** One line about the last sync with the Transat admin panel, and whether it is a problem. */
+private fun syncMessage(sync: EventSyncState): Pair<String, Boolean>? = when (sync) {
+    EventSyncState.Idle -> null
+    EventSyncState.Running -> "Récupération des évènements préparés dans le panel Transat…" to false
+    EventSyncState.NotConfigured -> "Serveur Transat non configuré : seuls les évènements créés sur la tablette sont proposés." to false
+    is EventSyncState.Failed -> sync.message to true
+    is EventSyncState.Done -> (
+        sync.warning?.let { "Synchronisé, avec un problème : $it" }
+            ?: "Synchronisé à ${EventDates.formatTime(sync.atMillis)} : ${sync.events} évènement${if (sync.events > 1) "s" else ""} du panel Transat."
+        ) to (sync.warning != null)
+}
+
 @Composable
 private fun EventRow(event: EventEntity, onClick: () -> Unit) {
     Card(
@@ -76,7 +103,11 @@ private fun EventRow(event: EventEntity, onClick: () -> Unit) {
     ) {
         Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.weight(1f)) {
-                Text(event.name, style = MaterialTheme.typography.headlineSmall)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(event.name, style = MaterialTheme.typography.headlineSmall)
+                    if (event.eventDate == EventDates.todayUtc()) AssistChip(onClick = onClick, label = { Text("Aujourd'hui") })
+                    if (event.remoteId != null) AssistChip(onClick = onClick, label = { Text("Panel Transat") })
+                }
                 Text(
                     EventDates.format(event.eventDate.takeIf { it > 0 } ?: event.createdAt, "EEEE d MMMM yyyy"),
                     style = MaterialTheme.typography.bodyMedium,

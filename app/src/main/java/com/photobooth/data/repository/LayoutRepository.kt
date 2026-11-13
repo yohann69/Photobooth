@@ -54,6 +54,12 @@ class LayoutRepository @Inject constructor(
         dao.update(current.copy(customFramePngPath = path))
     }
 
+    /** A frame from the Transat server (or its removal there, with null): [sha256] is what the server holds. */
+    suspend fun setRemoteFrame(eventId: String, type: LayoutType, path: String?, sha256: String?) {
+        val current = dao.get(eventId, type) ?: return
+        dao.update(current.copy(customFramePngPath = path, remoteFrameSha256 = sha256))
+    }
+
     suspend fun setBackgroundColor(eventId: String, type: LayoutType, hex: String) {
         val current = dao.get(eventId, type) ?: return
         dao.update(current.copy(backgroundColorHex = hex))

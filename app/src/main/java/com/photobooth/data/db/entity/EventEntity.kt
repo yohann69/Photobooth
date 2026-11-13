@@ -25,4 +25,6 @@ data class EventEntity(
     @ColumnInfo(defaultValue = "1") val attractSlideshow: Boolean = true,
     /** Native ratio of the event's camera; layout slots are generated with it. */
     @ColumnInfo(defaultValue = "'RATIO_4_3'") val photoAspect: PhotoAspect = PhotoAspect.RATIO_4_3,
+    /** Id of the event on the Transat server when it was prepared in the admin panel; null for a local event. */
+    val remoteId: Long? = null,
 )

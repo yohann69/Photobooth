@@ -8,7 +8,6 @@ import com.photobooth.data.frames.FrameStorage
 import com.photobooth.data.repository.LayoutRepository
 import com.photobooth.data.settings.SettingsRepository
 import com.photobooth.data.storage.EventStorage
-import com.photobooth.domain.layout.DefaultLayoutPresets
 import com.photobooth.domain.model.LayoutType
 import com.photobooth.feature.booth.frenchTitle
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +23,6 @@ import org.json.JSONObject
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.roundToInt
 
 sealed interface FrameLinkState {
     data object Closed : FrameLinkState
@@ -71,7 +69,7 @@ class FrameReceiver @Inject constructor(
         }
         val configs = layouts.observeForEvent(event.id).first()
         val offered = configs.filter { it.isEnabled }.ifEmpty { configs }
-        val link = api.openFrameLink(server, event.name, JSONArray(offered.map { geometry(it, event) })).getOrElse {
+        val link = api.openFrameLink(server, event.name, event.remoteId, JSONArray(offered.map { geometry(it, event) })).getOrElse {
             Log.w(TAG, "FrameReceiver: could not open a link: ${it.message}")
             _state.value = FrameLinkState.Failed("Could not reach the Transat server: ${it.message}")
             return@withContext
@@ -133,7 +131,9 @@ class FrameReceiver @Inject constructor(
             val png = api.downloadFrame(server, link.id, frame).getOrThrow()
             val file = frames.importBytes(storage.subfolder(event, EventStorage.FRAMES), config, png).getOrThrow()
             frames.delete(config.customFramePngPath)
-            layouts.setFramePath(event.id, type, file.absolutePath)
+            // A link opened for a server event also files the frame there: the next sync must not fetch it again.
+            if (event.remoteId != null) layouts.setRemoteFrame(event.id, type, file.absolutePath, frame.sha256)
+            else layouts.setFramePath(event.id, type, file.absolutePath)
             Log.i(TAG, "FrameReceiver: applied ${frame.width}x${frame.height} frame to $type")
         }
 
@@ -148,28 +148,9 @@ class FrameReceiver @Inject constructor(
         return BoothCredential.parse(s.uploadToken)?.let { TransatServer(s.uploadBaseUrl, it) }
     }
 
-    private fun geometry(cfg: EventLayoutConfigEntity, event: EventEntity): JSONObject {
-        val w = cfg.canvasWidthPx
-        val h = cfg.canvasHeightPx
-        val zone = DefaultLayoutPresets.forType(cfg.layoutType, event.photoAspect).safeZone
-        val photos = JSONArray()
-        cfg.effectiveSlots().forEachIndexed { i, s ->
-            // Calibration may push a slot past the edge: the page only needs what lands on the sheet.
-            val x = (s.x * w).roundToInt().coerceIn(0, w - 1)
-            val y = (s.y * h).roundToInt().coerceIn(0, h - 1)
-            val right = ((s.x + s.width) * w).roundToInt().coerceIn(x + 1, w)
-            val bottom = ((s.y + s.height) * h).roundToInt().coerceIn(y + 1, h)
-            photos.put(JSONObject().put("x", x).put("y", y).put("w", right - x).put("h", bottom - y).put("shot", (s.sourceIndex ?: i) + 1))
-        }
-        return JSONObject()
-            .put("type", cfg.layoutType.name)
-            .put("title", cfg.layoutType.frenchTitle())
-            .put("width", w)
-            .put("height", h)
-            .put("title_zone", JSONObject().put("x", zone.x).put("y", zone.y).put("w", zone.width).put("h", zone.height))
-            .put("photos", photos)
+    private fun geometry(cfg: EventLayoutConfigEntity, event: EventEntity): JSONObject =
+        LayoutGeometry.json(cfg.layoutType, cfg.canvasWidthPx, cfg.canvasHeightPx, cfg.effectiveSlots(), event.photoAspect)
             .put("has_frame", cfg.customFramePngPath != null)
-    }
 
     private companion object {
         const val POLL_MS = 3_000L

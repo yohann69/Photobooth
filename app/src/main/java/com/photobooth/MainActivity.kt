@@ -74,12 +74,15 @@ class MainActivity : ComponentActivity() {
                 Surface {
                     val app by appViewModel.state.collectAsStateWithLifecycle()
                     val events by appViewModel.eventList.collectAsStateWithLifecycle()
+                    val sync by appViewModel.syncState.collectAsStateWithLifecycle()
                     when (app.route) {
                         AppRoute.EVENT_PICKER -> EventPickerScreen(
                             events,
                             onPick = { appViewModel.onIntent(AppIntent.PickEvent(it)) },
                             onCreate = { name, date -> appViewModel.onIntent(AppIntent.CreateEvent(name, date)) },
                             onSettings = { appViewModel.onIntent(AppIntent.RequestSettings) },
+                            sync = sync,
+                            onSync = { appViewModel.onIntent(AppIntent.SyncEvents) },
                         )
                         AppRoute.GUEST -> BoothRoot(boothViewModel, onAdminRequested = { appViewModel.onIntent(AppIntent.RequestAdmin) })
                         AppRoute.ADMIN -> {

@@ -11,6 +11,9 @@ import java.util.TimeZone
 object EventDates {
     fun todayUtc(): Long = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 
+    /** Wall-clock time of an instant, on the tablet's time zone. */
+    fun formatTime(millis: Long): String = SimpleDateFormat("HH:mm", Locale.FRANCE).format(Date(millis))
+
     fun format(utcMillis: Long, pattern: String = "d MMM yyyy", locale: Locale = Locale.FRANCE): String =
         SimpleDateFormat(pattern, locale).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(utcMillis))
 }

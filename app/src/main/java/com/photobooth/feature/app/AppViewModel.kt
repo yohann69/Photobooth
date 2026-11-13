@@ -8,6 +8,8 @@ import com.photobooth.data.repository.LayoutRepository
 import com.photobooth.data.settings.AppSettings
 import com.photobooth.data.settings.SettingsRepository
 import com.photobooth.domain.model.LayoutType
+import com.photobooth.share.EventSync
+import com.photobooth.share.EventSyncState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /** EVENT_PICKER is the start screen: the operator confirms or changes the running event before guests see anything. */
@@ -51,6 +54,8 @@ sealed interface AppIntent {
     data class PickEvent(val eventId: String) : AppIntent
     data class CreateEvent(val name: String, val dateUtc: Long) : AppIntent
     data object EventSettingsOpened : AppIntent
+    /** Fetch the events prepared in the Transat admin panel again. */
+    data object SyncEvents : AppIntent
 }
 
 private sealed interface PendingAction {
@@ -66,6 +71,7 @@ class AppViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val events: EventRepository,
     layouts: LayoutRepository,
+    private val eventSync: EventSync,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppUiState())
@@ -84,10 +90,15 @@ class AppViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuestInfo())
 
+    val syncState: StateFlow<EventSyncState> = eventSync.state
+
     init {
-        // A kiosk that starts on its own (after a reboot, on Home) opens straight on the guest screen of the running
-        // event; the operator changes event from the admin panel.
         viewModelScope.launch {
+            // Events prepared in the admin panel first, then today's event becomes the running one by default.
+            withTimeoutOrNull(STARTUP_SYNC_MS) { eventSync.sync() }
+            eventSync.selectToday()
+            // A kiosk that starts on its own (after a reboot, on Home) opens straight on the guest screen of the
+            // running event; the operator changes event from the admin panel.
             if (settingsRepository.settings.first().kioskModeEnabled && events.getActive() != null) {
                 _state.update { if (it.route == AppRoute.EVENT_PICKER) it.copy(route = AppRoute.GUEST) else it }
             }
@@ -108,6 +119,11 @@ class AppViewModel @Inject constructor(
             }
             is AppIntent.CreateEvent -> askPin(PendingAction.Create(intent.name.trim(), intent.dateUtc))
             AppIntent.EventSettingsOpened -> _state.update { it.copy(openEventSettings = false) }
+            AppIntent.SyncEvents -> viewModelScope.launch {
+                eventSync.sync()
+                // Only on the start screen: never switch the running event under the guests' feet.
+                if (_state.value.route == AppRoute.EVENT_PICKER) eventSync.selectToday()
+            }
             AppIntent.DismissPin -> _state.update { it.copy(pinDialogVisible = false, pinError = null) }
             AppIntent.RequestSettings -> askPin(PendingAction.OpenSettings)
             AppIntent.OpenSettings -> openSettings(AppRoute.ADMIN)
@@ -170,5 +186,7 @@ class AppViewModel @Inject constructor(
     private companion object {
         const val MAX_ATTEMPTS = 5
         const val LOCKOUT_MS = 30_000L
+        /** A booth without network still starts, on the events it already has. */
+        const val STARTUP_SYNC_MS = 15_000L
     }
 }

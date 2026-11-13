@@ -38,6 +38,9 @@ interface EventDao {
     @Query("SELECT * FROM events WHERE id = :id")
     suspend fun getById(id: String): EventEntity?
 
+    @Query("SELECT * FROM events WHERE remoteId = :remoteId LIMIT 1")
+    suspend fun getByRemoteId(remoteId: Long): EventEntity?
+
     @Query("UPDATE events SET isActive = 0 WHERE isActive = 1")
     suspend fun deactivateAll()
 
